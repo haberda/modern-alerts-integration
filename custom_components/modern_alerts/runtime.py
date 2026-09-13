@@ -146,6 +146,11 @@ class AlertRuntime:
             value = float(state)
         except (ValueError, TypeError):
             return state == self.config.state
+        if self.firing:
+            if self.config.numeric_recover_above is not None:
+                return value <= self.config.numeric_recover_above
+            if self.config.numeric_recover_below is not None:
+                return value >= self.config.numeric_recover_below
         if self.config.numeric_below is not None:
             return value < self.config.numeric_below
         if self.config.numeric_above is not None:
