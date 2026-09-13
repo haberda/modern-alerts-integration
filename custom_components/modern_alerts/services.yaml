@@ -40,3 +40,19 @@ test_notification:
     entity:
       integration: modern_alerts
       domain: sensor
+snooze:
+  name: Snooze
+  description: Silence reminders for the selected number of minutes while the problem remains active.
+  fields:
+    minutes:
+      name: Minutes
+      required: false
+      selector:
+        number:
+          min: 1
+          max: 10080
+          step: 1
+  target:
+    entity:
+      integration: modern_alerts
+      domain: sensor

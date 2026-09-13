@@ -154,8 +154,10 @@ async def test_reload_has_documented_startup_policy(hass, notifications, evaluat
     assert await hass.config_entries.async_reload(entry.entry_id)
     await hass.async_block_till_done()
     assert entity_id(hass, entry, "sensor", "status") == status
-    assert entry.runtime_data.state == ("on" if evaluate else "idle")
-    assert len(notifications) == (2 if evaluate else 1)
+    # Persistence restores the active acknowledged incident regardless of the
+    # startup evaluation setting; no duplicate notification is emitted.
+    assert entry.runtime_data.state == "off"
+    assert len(notifications) == 1
 
 
 async def test_test_button(hass, notifications):

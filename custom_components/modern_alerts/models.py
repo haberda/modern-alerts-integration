@@ -43,6 +43,15 @@ class AlertConfig:
     done_message: str | None = None
     data: dict[str, Any] = field(default_factory=dict)
     evaluate_on_start: bool = False
+    activation_delay: float = 0.0
+    recovery_delay: float = 0.0
+    unavailable_policy: str = "resolve"
+    enable_snooze: bool = True
+    action_buttons: bool = False
+    numeric_below: float | None = None
+    numeric_above: float | None = None
+    numeric_recover_above: float | None = None
+    numeric_recover_below: float | None = None
 
     @classmethod
     def from_dict(cls, values: Mapping[str, Any], hass: HomeAssistant) -> AlertConfig:
@@ -121,6 +130,32 @@ class AlertConfig:
             if not isinstance(value := values.get(key, default), bool):
                 raise InvalidConfig(key, "invalid_boolean")
             flags[key] = value
+        for key in ("activation_delay", "recovery_delay"):
+            try:
+                value = float(values.get(key, 0))
+                if not isfinite(value) or value < 0:
+                    raise ValueError
+            except (TypeError, ValueError):
+                raise InvalidConfig(key, "invalid_duration") from None
+            flags[key] = value
+        policy = values.get("unavailable_policy", "resolve")
+        if policy not in ("resolve", "suspend"):
+            raise InvalidConfig("unavailable_policy", "invalid_policy")
+        flags["unavailable_policy"] = policy
+        for key in ("enable_snooze", "action_buttons"):
+            if not isinstance(value := values.get(key, True if key == "enable_snooze" else False), bool):
+                raise InvalidConfig(key, "invalid_boolean")
+            flags[key] = value
+        for key in ("numeric_below", "numeric_above", "numeric_recover_above", "numeric_recover_below"):
+            value = values.get(key)
+            if value is not None:
+                try:
+                    value = float(value)
+                    if not isfinite(value):
+                        raise ValueError
+                except (TypeError, ValueError):
+                    raise InvalidConfig(key, "invalid_number") from None
+            flags[key] = value
         return cls(
             name=values["name"].strip(),
             entity_id=entity_id,
@@ -148,4 +183,13 @@ class AlertConfig:
             "done_message": self.done_message,
             "data": deepcopy(self.data),
             "evaluate_on_start": self.evaluate_on_start,
+            "activation_delay": self.activation_delay,
+            "recovery_delay": self.recovery_delay,
+            "unavailable_policy": self.unavailable_policy,
+            "enable_snooze": self.enable_snooze,
+            "action_buttons": self.action_buttons,
+            "numeric_below": self.numeric_below,
+            "numeric_above": self.numeric_above,
+            "numeric_recover_above": self.numeric_recover_above,
+            "numeric_recover_below": self.numeric_recover_below,
         }

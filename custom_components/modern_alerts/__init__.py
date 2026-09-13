@@ -2,10 +2,11 @@
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
-from homeassistant.core import HomeAssistant
+from homeassistant.core import Event, HomeAssistant
 from homeassistant.exceptions import ConfigEntryError
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.service import async_register_platform_entity_service
+from homeassistant.helpers.storage import Store
 from homeassistant.helpers.typing import ConfigType
 
 from .const import DOMAIN
@@ -25,10 +26,24 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
         "turn_on": "async_turn_on",
         "toggle": "async_toggle",
         "test_notification": "async_test_notification",
+        "snooze": "async_snooze",
     }.items():
         async_register_platform_entity_service(
             hass, DOMAIN, service, entity_domain="sensor", schema={}, func=method
         )
+    async def mobile_action(event: Event) -> None:
+        action = event.data.get("action")
+        for entry in hass.config_entries.async_entries(DOMAIN):
+            if entry.state.name != "LOADED":
+                continue
+            if action == "MODERN_ALERTS_ACK":
+                entry.runtime_data.acknowledge(True, event.context)
+            elif action == "MODERN_ALERTS_SNOOZE":
+                try:
+                    entry.runtime_data.snooze(30)
+                except Exception:
+                    continue
+    hass.bus.async_listen("mobile_app_notification_action", mobile_action)
     return True
 
 
@@ -39,9 +54,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ModernAlertsEntry) -> bo
     except InvalidConfig as err:
         raise ConfigEntryError(str(err)) from err
     entry.runtime_data = AlertRuntime(hass, config)
+    store = Store(hass, 1, f"modern_alerts.{entry.entry_id}")
+    saved = await store.async_load()
+    if isinstance(saved, dict):
+        entry.runtime_data.restore(saved)
+    entry.runtime_data.store = store
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     entry.runtime_data.start()
     entry.async_on_unload(entry.add_update_listener(async_update_options))
+    entry.async_on_unload(lambda: entry.runtime_data.async_save())
     return True
 
 

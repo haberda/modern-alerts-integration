@@ -49,6 +49,10 @@ class AlertRuntime:
         self._delivery_lock = asyncio.Lock()
         self._reminder_pending: int | None = None
         self._context: Context | None = None
+        self.store = None
+        self.snoozed_until: datetime | None = None
+        self._pending_activation: Callable[[], None] | None = None
+        self._pending_recovery: Callable[[], None] | None = None
 
     @property
     def state(self) -> str:
@@ -76,6 +80,28 @@ class AlertRuntime:
             if state is not None:
                 self._evaluate(state.state)
 
+    def restore(self, data: dict[str, Any]) -> None:
+        """Restore incident metadata; source state still gates active status."""
+        self.acknowledged = bool(data.get("acknowledged", False))
+        self.attempted = bool(data.get("attempted", False))
+        self.next_index = min(int(data.get("next_index", 0)), len(self.config.repeat) - 1)
+        self.firing = bool(data.get("firing", False))
+        for key in ("last_attempt", "snoozed_until"):
+            value = data.get(key)
+            if value:
+                setattr(self, key, dt_util.parse_datetime(value))
+
+    async def async_save(self) -> None:
+        if self.store:
+            await self.store.async_save({
+                "firing": self.firing,
+                "acknowledged": self.acknowledged,
+                "attempted": self.attempted,
+                "next_index": self.next_index,
+                "last_attempt": self.last_attempt.isoformat() if self.last_attempt else None,
+                "snoozed_until": self.snoozed_until.isoformat() if self.snoozed_until else None,
+            })
+
     @callback
     def _state_changed(self, event: Event[EventStateChangedData]) -> None:
         if self._stopped or (state := event.data["new_state"]) is None:
@@ -85,11 +111,16 @@ class AlertRuntime:
 
     @callback
     def _evaluate(self, state: str) -> None:
-        matches = state == self.config.state
+        if state in ("unknown", "unavailable") and self.config.unavailable_policy == "suspend":
+            return
+        matches = self._matches(state)
         if matches == self.firing:
             return
         self._generation += 1
         if matches:
+            if self.config.activation_delay:
+                self._schedule_transition(True, self.config.activation_delay)
+                return
             self.firing = True
             self.acknowledged = False
             self.attempted = False
@@ -98,6 +129,9 @@ class AlertRuntime:
                 self._queue_reminder()
             self._schedule()
         else:
+            if self.config.recovery_delay and self.firing:
+                self._schedule_transition(False, self.config.recovery_delay)
+                return
             send_done = self.attempted
             self._cancel()
             self.firing = False
@@ -106,6 +140,35 @@ class AlertRuntime:
             if send_done and self.config.done_message is not None:
                 self._task(self._deliver(self.config, self._generation, done=True))
         self._publish()
+
+    def _matches(self, state: str) -> bool:
+        try:
+            value = float(state)
+        except (ValueError, TypeError):
+            return state == self.config.state
+        if self.config.numeric_below is not None:
+            return value < self.config.numeric_below
+        if self.config.numeric_above is not None:
+            return value > self.config.numeric_above
+        return state == self.config.state
+
+    @callback
+    def _schedule_transition(self, active: bool, delay: float) -> None:
+        cancel_attr = "_pending_activation" if active else "_pending_recovery"
+        old = getattr(self, cancel_attr)
+        if old:
+            old()
+        generation = self._generation
+        when = dt_util.utcnow() + timedelta(seconds=delay)
+        def done(_: datetime) -> None:
+            if generation != self._generation or self._stopped:
+                return
+            state = self.hass.states.get(self.config.entity_id)
+            if state and self._matches(state.state) == active:
+                setattr(self, cancel_attr, None)
+                self._generation += 1
+                self._evaluate(state.state)
+        setattr(self, cancel_attr, async_track_point_in_utc_time(self.hass, done, when))
 
     @callback
     def _cancel(self) -> None:
@@ -185,6 +248,31 @@ class AlertRuntime:
         self._context = context
         self.acknowledged = acknowledged
         self._publish()
+
+    def snooze(self, minutes: float) -> None:
+        if not self.config.enable_snooze or not self.firing:
+            raise ServiceValidationError("Snooze is unavailable for this alert")
+        if minutes <= 0:
+            raise ServiceValidationError("Snooze duration must be positive")
+        self.snoozed_until = dt_util.utcnow() + timedelta(minutes=minutes)
+        self.acknowledged = True
+        self._publish()
+        self._schedule_snooze_expiry()
+
+    async def async_snooze(self, minutes: float = 30) -> None:
+        self.snooze(minutes)
+
+    @callback
+    def _schedule_snooze_expiry(self) -> None:
+        if not self.snoozed_until:
+            return
+        generation = self._generation
+        def wake(_: datetime) -> None:
+            if generation == self._generation and self.firing:
+                self.snoozed_until = None
+                self.acknowledged = False
+                self._publish()
+        async_track_point_in_utc_time(self.hass, wake, self.snoozed_until)
 
     async def async_test_notification(self, context: Context | None = None) -> None:
         """Explicit test: no incident bookkeeping or resolution eligibility."""

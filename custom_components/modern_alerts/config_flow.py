@@ -47,6 +47,11 @@ class AlertFlowSteps:
             "skip_first": self._values.get("skip_first", False),
             "can_acknowledge": self._values.get("can_acknowledge", True),
             "evaluate_on_start": self._values.get("evaluate_on_start", False),
+            "activation_delay": self._values.get("activation_delay", 0),
+            "recovery_delay": self._values.get("recovery_delay", 0),
+            "unavailable_policy": self._values.get("unavailable_policy", "resolve"),
+            "enable_snooze": self._values.get("enable_snooze", True),
+            "action_buttons": self._values.get("action_buttons", False),
         }
         if user_input is not None:
             values.update(user_input)
@@ -86,8 +91,13 @@ class AlertFlowSteps:
             vol.Required("skip_first", default=False): selector.BooleanSelector(),
             vol.Required("can_acknowledge", default=True): selector.BooleanSelector(),
             vol.Required(
-                "evaluate_on_start", default=False
+            "evaluate_on_start", default=False
             ): selector.BooleanSelector(),
+            vol.Required("activation_delay", default=0): selector.NumberSelector({"min": 0, "step": "any", "unit_of_measurement": "seconds"}),
+            vol.Required("recovery_delay", default=0): selector.NumberSelector({"min": 0, "step": "any", "unit_of_measurement": "seconds"}),
+            vol.Required("unavailable_policy", default="resolve"): selector.SelectSelector({"options": ["resolve", "suspend"]}),
+            vol.Required("enable_snooze", default=True): selector.BooleanSelector(),
+            vol.Required("action_buttons", default=False): selector.BooleanSelector(),
         }
         return self.async_show_form(
             step_id="timing", data_schema=self._schema(fields, values), errors=errors
