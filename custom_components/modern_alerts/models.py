@@ -150,7 +150,9 @@ class AlertConfig:
         if policy not in ("resolve", "suspend"):
             raise InvalidConfig("unavailable_policy", "invalid_policy")
         flags["unavailable_policy"] = policy
-        unit = values.get("numeric_unit") or None
+        unit = values.get("numeric_unit")
+        if unit == "":
+            unit = None
         if unit is not None and (not isinstance(unit, str) or not unit.strip()):
             raise InvalidConfig("numeric_unit", "required")
         flags["numeric_unit"] = unit

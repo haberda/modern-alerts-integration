@@ -203,6 +203,8 @@ class AlertRuntime:
             state is None
             and self.config.unavailable_policy == "resolve"
             and not self._awaiting_source
+            and self.config.numeric_below is None
+            and self.config.numeric_above is None
         ):
             return
         self._context = event.context
@@ -547,6 +549,12 @@ class AlertRuntime:
         # Edits reconcile the current source even in legacy startup mode.
         if (state := self.hass.states.get(config.entity_id)) is not None:
             self._evaluate(state.state)
+        elif (
+            config.unavailable_policy == "suspend"
+            or config.numeric_below is not None
+            or config.numeric_above is not None
+        ):
+            self._evaluate("unavailable")
         if self.firing and self.next_notification is None:
             self._schedule()
         self._publish()

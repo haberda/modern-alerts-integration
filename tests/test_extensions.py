@@ -370,3 +370,45 @@ async def test_unload_cancels_pending_activation_and_snooze(
     await other.async_stop()
     await advance(hass, freezer, 60)
     assert len(notifications) == 1 and other._cancel_timer is None
+
+
+async def test_missing_numeric_source_and_edit_remain_suspended(
+    hass, make_runtime, notifications, freezer
+):
+    runtime = make_runtime(numeric_below=15, repeat=[1])
+    await set_state(hass, "14")
+    hass.states.async_remove("binary_sensor.garage")
+    await hass.async_block_till_done()
+    assert runtime.source_suspended
+    await runtime.async_update_config(
+        AlertConfig.from_dict({**runtime.config.as_dict(), "name": "Renamed"}, hass)
+    )
+    await advance(hass, freezer, 10)
+    assert runtime.firing and runtime.source_suspended and len(notifications) == 1
+    await set_state(hass, "14")
+    assert len(notifications) == 2
+
+
+async def test_disabling_restore_and_deleting_clear_storage(hass, notifications):
+    from homeassistant.helpers.storage import Store
+
+    entry = await setup_alert(hass, restore_state=True)
+    await set_state(hass, "on")
+    await entry.runtime_data.async_save()
+    key = f"modern_alerts.{entry.entry_id}"
+    saved = await Store(hass, 1, key).async_load()
+    assert saved["firing"] and saved["next_notification"]
+    hass.config_entries.async_update_entry(
+        entry, options={**entry.data, "restore_state": False}
+    )
+    await hass.async_block_till_done()
+    assert await Store(hass, 1, key).async_load() is None
+    hass.config_entries.async_update_entry(
+        entry, options={**entry.data, "restore_state": True}
+    )
+    await hass.async_block_till_done()
+    await entry.runtime_data.async_save()
+    assert await Store(hass, 1, key).async_load() is not None
+    assert await hass.config_entries.async_remove(entry.entry_id)
+    await hass.async_block_till_done()
+    assert await Store(hass, 1, key).async_load() is None
