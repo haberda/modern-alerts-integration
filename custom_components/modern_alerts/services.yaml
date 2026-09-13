@@ -1,0 +1,42 @@
+acknowledge:
+  name: Acknowledge
+  description: Silence reminders for the current incident until it resolves. Targets Modern Alerts status sensors.
+  target:
+    entity:
+      integration: modern_alerts
+      domain: sensor
+unacknowledge:
+  name: Resume reminders
+  description: Resume on the existing reminder schedule. Does not send immediately or create an incident.
+  target:
+    entity:
+      integration: modern_alerts
+      domain: sensor
+turn_off:
+  name: Acknowledge (turn off)
+  description: Alias for acknowledge. Does not disable condition monitoring.
+  target:
+    entity:
+      integration: modern_alerts
+      domain: sensor
+turn_on:
+  name: Resume (turn on)
+  description: Alias for unacknowledge. Does not force the problem to become active.
+  target:
+    entity:
+      integration: modern_alerts
+      domain: sensor
+toggle:
+  name: Toggle acknowledgement
+  description: Toggle acknowledgement of the selected alert.
+  target:
+    entity:
+      integration: modern_alerts
+      domain: sensor
+test_notification:
+  name: Test notification
+  description: Send the current alert message explicitly, without changing incident or resolution eligibility.
+  target:
+    entity:
+      integration: modern_alerts
+      domain: sensor
