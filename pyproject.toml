@@ -1,0 +1,17 @@
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]
+addopts = "--strict-markers --disable-socket --allow-unix-socket"
+
+[tool.ruff]
+target-version = "py314"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "ASYNC"]
+
+[tool.coverage.run]
+source = ["custom_components.modern_alerts"]
+
+[tool.coverage.report]
+show_missing = true
