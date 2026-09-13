@@ -146,7 +146,7 @@ async def test_invalid_saved_config_fails_clearly(hass):
 
 @pytest.mark.parametrize("evaluate", [False, True])
 async def test_reload_has_documented_startup_policy(hass, notifications, evaluate):
-    entry = await setup_alert(hass, evaluate_on_start=evaluate)
+    entry = await setup_alert(hass, evaluate_on_start=evaluate, restore_state=True)
     status = entity_id(hass, entry, "sensor", "status")
     hass.states.async_set("binary_sensor.garage", "on")
     await hass.async_block_till_done()

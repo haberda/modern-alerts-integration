@@ -1,11 +1,13 @@
 """Modern Alerts integration."""
 
-from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import Platform
-from homeassistant.core import Event, HomeAssistant
+import voluptuous as vol
+from homeassistant.config_entries import ConfigEntry, ConfigEntryState
+from homeassistant.const import EVENT_HOMEASSISTANT_STOP, Platform
+from homeassistant.core import Event, HomeAssistant, callback
 from homeassistant.exceptions import ConfigEntryError
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.service import async_register_platform_entity_service
+from homeassistant.helpers.start import async_at_started
 from homeassistant.helpers.storage import Store
 from homeassistant.helpers.typing import ConfigType
 
@@ -27,22 +29,34 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
         "toggle": "async_toggle",
         "test_notification": "async_test_notification",
         "snooze": "async_snooze",
+        "cancel_snooze": "async_cancel_snooze",
     }.items():
         async_register_platform_entity_service(
-            hass, DOMAIN, service, entity_domain="sensor", schema={}, func=method
+            hass,
+            DOMAIN,
+            service,
+            entity_domain="sensor",
+            schema={
+                vol.Optional("minutes"): vol.All(
+                    vol.Coerce(float), vol.Range(min=0, min_included=False, max=10080)
+                )
+            }
+            if service == "snooze"
+            else {},
+            func=method,
         )
+
     async def mobile_action(event: Event) -> None:
         action = event.data.get("action")
-        for entry in hass.config_entries.async_entries(DOMAIN):
-            if entry.state.name != "LOADED":
-                continue
-            if action == "MODERN_ALERTS_ACK":
-                entry.runtime_data.acknowledge(True, event.context)
-            elif action == "MODERN_ALERTS_SNOOZE":
-                try:
-                    entry.runtime_data.snooze(30)
-                except Exception:
-                    continue
+        if not isinstance(action, str):
+            return
+        parts = action.split(":")
+        if len(parts) != 5 or parts[0] != "MODERN_ALERTS":
+            return
+        entry = hass.config_entries.async_get_entry(parts[1])
+        if entry and entry.domain == DOMAIN and entry.state is ConfigEntryState.LOADED:
+            entry.runtime_data.handle_mobile_action(action, event.context)
+
     hass.bus.async_listen("mobile_app_notification_action", mobile_action)
     return True
 
@@ -54,15 +68,29 @@ async def async_setup_entry(hass: HomeAssistant, entry: ModernAlertsEntry) -> bo
     except InvalidConfig as err:
         raise ConfigEntryError(str(err)) from err
     entry.runtime_data = AlertRuntime(hass, config)
-    store = Store(hass, 1, f"modern_alerts.{entry.entry_id}")
+    entry.runtime_data.entry_id = entry.entry_id
+    store = Store(
+        hass, 1, f"modern_alerts.{entry.entry_id}", private=True, atomic_writes=True
+    )
     saved = await store.async_load()
     if isinstance(saved, dict):
         entry.runtime_data.restore(saved)
     entry.runtime_data.store = store
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
-    entry.runtime_data.start()
+
+    @callback
+    def start(hass: HomeAssistant) -> None:
+        entry.runtime_data.start()
+
+    entry.async_on_unload(async_at_started(hass, start))
     entry.async_on_unload(entry.add_update_listener(async_update_options))
-    entry.async_on_unload(lambda: entry.runtime_data.async_save())
+
+    async def shutdown(event: Event) -> None:
+        await entry.runtime_data.async_stop()
+
+    entry.async_on_unload(
+        hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STOP, shutdown)
+    )
     return True
 
 
@@ -85,3 +113,8 @@ async def async_unload_entry(hass: HomeAssistant, entry: ModernAlertsEntry) -> b
         await entry.runtime_data.async_stop()
         return True
     return False
+
+
+async def async_remove_entry(hass: HomeAssistant, entry: ModernAlertsEntry) -> None:
+    """Delete private incident data when the alert is deleted."""
+    await Store(hass, 1, f"modern_alerts.{entry.entry_id}").async_remove()

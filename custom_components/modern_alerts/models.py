@@ -43,6 +43,8 @@ class AlertConfig:
     done_message: str | None = None
     data: dict[str, Any] = field(default_factory=dict)
     evaluate_on_start: bool = False
+    restore_state: bool = False
+    snooze_minutes: float = 30.0
     activation_delay: float = 0.0
     recovery_delay: float = 0.0
     unavailable_policy: str = "resolve"
@@ -52,6 +54,7 @@ class AlertConfig:
     numeric_above: float | None = None
     numeric_recover_above: float | None = None
     numeric_recover_below: float | None = None
+    numeric_unit: str | None = None
 
     @classmethod
     def from_dict(cls, values: Mapping[str, Any], hass: HomeAssistant) -> AlertConfig:
@@ -126,36 +129,64 @@ class AlertConfig:
             ("skip_first", False),
             ("can_acknowledge", True),
             ("evaluate_on_start", False),
+            ("restore_state", False),
         ):
             if not isinstance(value := values.get(key, default), bool):
                 raise InvalidConfig(key, "invalid_boolean")
             flags[key] = value
-        for key in ("activation_delay", "recovery_delay"):
+        for key in ("activation_delay", "recovery_delay", "snooze_minutes"):
             try:
-                value = float(values.get(key, 0))
-                if not isfinite(value) or value < 0:
+                raw_value = values.get(key, 30 if key == "snooze_minutes" else 0)
+                value = float(raw_value)
+                if isinstance(raw_value, bool) or not isfinite(value) or value < 0:
                     raise ValueError
-            except (TypeError, ValueError):
+                if key == "snooze_minutes" and not 0 < value <= 10080:
+                    raise ValueError
+                dt_util.utcnow() + timedelta(seconds=value)
+            except TypeError, ValueError, OverflowError:
                 raise InvalidConfig(key, "invalid_duration") from None
             flags[key] = value
         policy = values.get("unavailable_policy", "resolve")
         if policy not in ("resolve", "suspend"):
             raise InvalidConfig("unavailable_policy", "invalid_policy")
         flags["unavailable_policy"] = policy
+        unit = values.get("numeric_unit") or None
+        if unit is not None and (not isinstance(unit, str) or not unit.strip()):
+            raise InvalidConfig("numeric_unit", "required")
+        flags["numeric_unit"] = unit
         for key in ("enable_snooze", "action_buttons"):
-            if not isinstance(value := values.get(key, True if key == "enable_snooze" else False), bool):
+            if not isinstance(
+                value := values.get(key, True if key == "enable_snooze" else False),
+                bool,
+            ):
                 raise InvalidConfig(key, "invalid_boolean")
             flags[key] = value
-        for key in ("numeric_below", "numeric_above", "numeric_recover_above", "numeric_recover_below"):
+        for key in (
+            "numeric_below",
+            "numeric_above",
+            "numeric_recover_above",
+            "numeric_recover_below",
+        ):
             value = values.get(key)
             if value is not None:
                 try:
+                    if isinstance(value, bool):
+                        raise ValueError
                     value = float(value)
                     if not isfinite(value):
                         raise ValueError
-                except (TypeError, ValueError):
+                except TypeError, ValueError:
                     raise InvalidConfig(key, "invalid_number") from None
             flags[key] = value
+        below, above = flags["numeric_below"], flags["numeric_above"]
+        recover_above = flags["numeric_recover_above"]
+        recover_below = flags["numeric_recover_below"]
+        if below is not None and above is not None:
+            raise InvalidConfig("numeric_above", "incompatible_thresholds")
+        if recover_above is not None and (below is None or recover_above < below):
+            raise InvalidConfig("numeric_recover_above", "incompatible_thresholds")
+        if recover_below is not None and (above is None or recover_below > above):
+            raise InvalidConfig("numeric_recover_below", "incompatible_thresholds")
         return cls(
             name=values["name"].strip(),
             entity_id=entity_id,
@@ -183,6 +214,8 @@ class AlertConfig:
             "done_message": self.done_message,
             "data": deepcopy(self.data),
             "evaluate_on_start": self.evaluate_on_start,
+            "restore_state": self.restore_state,
+            "snooze_minutes": self.snooze_minutes,
             "activation_delay": self.activation_delay,
             "recovery_delay": self.recovery_delay,
             "unavailable_policy": self.unavailable_policy,
@@ -192,4 +225,5 @@ class AlertConfig:
             "numeric_above": self.numeric_above,
             "numeric_recover_above": self.numeric_recover_above,
             "numeric_recover_below": self.numeric_recover_below,
+            "numeric_unit": self.numeric_unit,
         }

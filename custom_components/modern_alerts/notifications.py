@@ -22,6 +22,7 @@ async def async_notify(
     done: bool = False,
     context: Context | None = None,
     valid: Callable[[], bool] = lambda: True,
+    actions: list[dict[str, str]] | None = None,
 ) -> dict[str, str]:
     """Send to each destination, returning redacted error categories.
 
@@ -61,11 +62,8 @@ async def async_notify(
             data["entity_id"] = entity_id
         elif config.data:
             data["data"] = deepcopy(config.data)
-        if config.action_buttons and not done and not entity_id:
-            data.setdefault("data", {})["actions"] = [
-                {"action": "MODERN_ALERTS_ACK", "title": "Acknowledge"},
-                {"action": "MODERN_ALERTS_SNOOZE", "title": "Snooze"},
-            ]
+        if actions and not done and service.startswith("mobile_app_"):
+            data.setdefault("data", {})["actions"] = deepcopy(actions)
         try:
             async with asyncio.timeout(NOTIFY_TIMEOUT):
                 await hass.services.async_call(

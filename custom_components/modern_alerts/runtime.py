@@ -3,7 +3,9 @@
 import asyncio
 from collections.abc import Callable, Coroutine
 from datetime import datetime, timedelta
+from math import isfinite
 from typing import Any
+from uuid import uuid4
 
 from homeassistant.core import (
     Context,
@@ -51,8 +53,16 @@ class AlertRuntime:
         self._context: Context | None = None
         self.store = None
         self.snoozed_until: datetime | None = None
-        self._pending_activation: Callable[[], None] | None = None
-        self._pending_recovery: Callable[[], None] | None = None
+        self.pending_active: bool | None = None
+        self.pending_due: datetime | None = None
+        self.source_suspended = False
+        self.entry_id = ""
+        self.status_entity_id: str | None = None
+        self.incident_id = ""
+        self.action_token = ""
+        self._timer_generation = 0
+        self._restored = False
+        self._awaiting_source = False
 
     @property
     def state(self) -> str:
@@ -66,86 +76,188 @@ class AlertRuntime:
 
     @callback
     def _publish(self) -> None:
+        if self.store and not self._stopped and self.config.restore_state:
+            snapshot = self.snapshot()
+            self.store.async_delay_save(lambda: snapshot, 1)
         for listener in tuple(self._listeners):
             listener()
 
+    def _condition(self) -> list[Any]:
+        return [
+            self.config.entity_id,
+            self.config.state,
+            self.config.numeric_below,
+            self.config.numeric_above,
+            self.config.numeric_recover_above,
+            self.config.numeric_recover_below,
+            self.config.numeric_unit,
+        ]
+
     @callback
     def start(self) -> None:
+        if not self._stopped:
+            return
         self._stopped = False
         self._unsubscribe = async_track_state_change_event(
             self.hass, [self.config.entity_id], self._state_changed
         )
-        if self.config.evaluate_on_start:
+        if self._restored or self.config.evaluate_on_start:
             state = self.hass.states.get(self.config.entity_id)
-            if state is not None:
-                self._evaluate(state.state)
+            self._awaiting_source = self._restored
+            self._evaluate(state.state if state else "unavailable")
+        self._restored = False
+        self._arm()
+
+    def snapshot(self) -> dict[str, Any]:
+        """Serialize deadlines, not time remaining, to survive downtime."""
+        data = {
+            key: getattr(self, key)
+            for key in (
+                "firing",
+                "acknowledged",
+                "attempted",
+                "next_index",
+                "pending_active",
+                "incident_id",
+                "action_token",
+            )
+        }
+        data.update(schema=2, condition=self._condition())
+        for key in (
+            "next_notification",
+            "last_attempt",
+            "snoozed_until",
+            "pending_due",
+        ):
+            value = getattr(self, key)
+            data[key] = value.isoformat() if value else None
+        return data
 
     def restore(self, data: dict[str, Any]) -> None:
-        """Restore incident metadata; source state still gates active status."""
-        self.acknowledged = bool(data.get("acknowledged", False))
-        self.attempted = bool(data.get("attempted", False))
-        self.next_index = min(int(data.get("next_index", 0)), len(self.config.repeat) - 1)
-        self.firing = bool(data.get("firing", False))
-        for key in ("last_attempt", "snoozed_until"):
-            value = data.get(key)
-            if value:
-                setattr(self, key, dt_util.parse_datetime(value))
+        """Reject incomplete/old snapshots instead of restoring half an incident."""
+        if not self.config.restore_state:
+            return
+        try:
+            if data["schema"] != 2 or data["condition"] != self._condition():
+                return
+            values = {}
+            for key in ("firing", "acknowledged", "attempted"):
+                if type(data[key]) is not bool:
+                    raise ValueError
+                values[key] = data[key]
+            index = data["next_index"]
+            if type(index) is not int or not 0 <= index < len(self.config.repeat):
+                raise ValueError
+            values["next_index"] = index
+            for key in (
+                "next_notification",
+                "last_attempt",
+                "snoozed_until",
+                "pending_due",
+            ):
+                raw = data[key]
+                value = dt_util.parse_datetime(raw) if isinstance(raw, str) else None
+                if raw is not None and (value is None or value.tzinfo is None):
+                    raise ValueError
+                values[key] = value
+            for key in ("incident_id", "action_token"):
+                if not isinstance(data[key], str):
+                    raise ValueError
+                values[key] = data[key]
+            pending = data["pending_active"]
+            if pending is not None and type(pending) is not bool:
+                raise ValueError
+            if (pending is None) != (values["pending_due"] is None):
+                raise ValueError
+            if values["firing"] and (
+                values["next_notification"] is None or not values["incident_id"]
+            ):
+                raise ValueError
+            if not values["firing"] and (
+                values["next_notification"] or values["snoozed_until"]
+            ):
+                raise ValueError
+            values["pending_active"] = pending
+        except KeyError, TypeError, ValueError, OverflowError:
+            self.errors = {"restore": "invalid_snapshot"}
+            return
+        for key, value in values.items():
+            setattr(self, key, value)
+        self._restored = True
 
-    async def async_save(self) -> None:
+    async def async_save(self, snapshot: dict[str, Any] | None = None) -> None:
         if self.store:
-            await self.store.async_save({
-                "firing": self.firing,
-                "acknowledged": self.acknowledged,
-                "attempted": self.attempted,
-                "next_index": self.next_index,
-                "last_attempt": self.last_attempt.isoformat() if self.last_attempt else None,
-                "snoozed_until": self.snoozed_until.isoformat() if self.snoozed_until else None,
-            })
+            if self.config.restore_state:
+                await self.store.async_save(
+                    snapshot if snapshot is not None else self.snapshot()
+                )
+            else:
+                await self.store.async_remove()
 
     @callback
     def _state_changed(self, event: Event[EventStateChangedData]) -> None:
-        if self._stopped or (state := event.data["new_state"]) is None:
+        if self._stopped:
+            return
+        state = event.data["new_state"]
+        if (
+            state is None
+            and self.config.unavailable_policy == "resolve"
+            and not self._awaiting_source
+        ):
             return
         self._context = event.context
-        self._evaluate(state.state)
+        self._evaluate(state.state if state else "unavailable")
 
     @callback
     def _evaluate(self, state: str) -> None:
-        if state in ("unknown", "unavailable") and self.config.unavailable_policy == "suspend":
-            return
         matches = self._matches(state)
-        if matches == self.firing:
+        uncertain = state in ("unknown", "unavailable") and state != self.config.state
+        if matches is None or (
+            uncertain
+            and (self.config.unavailable_policy == "suspend" or self._awaiting_source)
+        ):
+            self.source_suspended = True
+            # A gap in observed data breaks a sustained transition, except while
+            # waiting for the first usable state of a restored incident.
+            if not self._awaiting_source:
+                self.pending_active = self.pending_due = None
+            self._arm()
+            self._publish()
             return
-        self._generation += 1
-        if matches:
-            if self.config.activation_delay:
-                self._schedule_transition(True, self.config.activation_delay)
-                return
-            self.firing = True
-            self.acknowledged = False
-            self.attempted = False
-            self.next_index = 0
-            if not self.config.skip_first:
-                self._queue_reminder()
-            self._schedule()
-        else:
-            if self.config.recovery_delay and self.firing:
-                self._schedule_transition(False, self.config.recovery_delay)
-                return
-            send_done = self.attempted
-            self._cancel()
-            self.firing = False
-            self.acknowledged = False
-            self.attempted = False
-            if send_done and self.config.done_message is not None:
-                self._task(self._deliver(self.config, self._generation, done=True))
+        self.source_suspended = False
+        self._awaiting_source = False
+        if matches == self.firing:
+            self.pending_active = self.pending_due = None
+        elif self.pending_active != matches:
+            delay = (
+                self.config.activation_delay if matches else self.config.recovery_delay
+            )
+            if delay:
+                self.pending_active = matches
+                self.pending_due = dt_util.utcnow() + timedelta(seconds=delay)
+            else:
+                self._transition(matches)
+        self._process_due()
+        self._arm()
         self._publish()
 
-    def _matches(self, state: str) -> bool:
+    def _matches(self, state: str) -> bool | None:
+        if self.config.numeric_below is None and self.config.numeric_above is None:
+            return state == self.config.state
+        if self.config.numeric_unit:
+            source = self.hass.states.get(self.config.entity_id)
+            if (
+                source is None
+                or source.attributes.get("unit_of_measurement")
+                != self.config.numeric_unit
+            ):
+                return None
         try:
             value = float(state)
-        except (ValueError, TypeError):
-            return state == self.config.state
+            if not isfinite(value):
+                return None
+        except ValueError, TypeError:
+            return None
         if self.firing:
             if self.config.numeric_recover_above is not None:
                 return value <= self.config.numeric_recover_above
@@ -153,54 +265,84 @@ class AlertRuntime:
                 return value >= self.config.numeric_recover_below
         if self.config.numeric_below is not None:
             return value < self.config.numeric_below
-        if self.config.numeric_above is not None:
-            return value > self.config.numeric_above
-        return state == self.config.state
+        return value > self.config.numeric_above
 
     @callback
-    def _schedule_transition(self, active: bool, delay: float) -> None:
-        cancel_attr = "_pending_activation" if active else "_pending_recovery"
-        old = getattr(self, cancel_attr)
-        if old:
-            old()
-        generation = self._generation
-        when = dt_util.utcnow() + timedelta(seconds=delay)
-        def done(_: datetime) -> None:
-            if generation != self._generation or self._stopped:
-                return
-            state = self.hass.states.get(self.config.entity_id)
-            if state and self._matches(state.state) == active:
-                setattr(self, cancel_attr, None)
-                self._generation += 1
-                self._evaluate(state.state)
-        setattr(self, cancel_attr, async_track_point_in_utc_time(self.hass, done, when))
+    def _transition(self, active: bool) -> None:
+        self._generation += 1
+        self.pending_active = self.pending_due = None
+        self.snoozed_until = None
+        self.acknowledged = False
+        send_done = self.attempted
+        self.attempted = False
+        self.firing = active
+        self.incident_id = uuid4().hex if active else ""
+        self.action_token = uuid4().hex if active else ""
+        if active:
+            self.next_index = 0
+            if not self.config.skip_first:
+                self._queue_reminder()
+            self._schedule()
+        else:
+            self.next_notification = None
+            if send_done and self.config.done_message is not None:
+                self._task(self._deliver(self.config, self._generation, done=True))
 
     @callback
     def _cancel(self) -> None:
+        self._timer_generation += 1
         if self._cancel_timer:
             self._cancel_timer()
             self._cancel_timer = None
-        self.next_notification = None
 
     @callback
     def _schedule(self) -> None:
-        self._cancel()
         self.next_notification = dt_util.utcnow() + timedelta(
             minutes=self.config.repeat[self.next_index]
         )
         self.next_index = min(self.next_index + 1, len(self.config.repeat) - 1)
-        generation = self._generation
+        self._arm()
+
+    @callback
+    def _process_due(self) -> None:
+        now = dt_util.utcnow()
+        if self.snoozed_until and self.snoozed_until <= now:
+            self.snoozed_until = None
+        if self.source_suspended:
+            return
+        if self.pending_due and self.pending_due <= now:
+            state = self.hass.states.get(self.config.entity_id)
+            if state and self._matches(state.state) == self.pending_active:
+                self._transition(self.pending_active)
+            else:
+                self.pending_active = self.pending_due = None
+        if self.firing and self.next_notification and self.next_notification <= now:
+            self._queue_reminder()
+            self._schedule()
+
+    @callback
+    def _arm(self) -> None:
+        self._cancel()
+        if self._stopped:
+            return
+        deadlines = [self.snoozed_until]
+        if not self.source_suspended:
+            deadlines.extend((self.pending_due, self.next_notification))
+        deadlines = [value for value in deadlines if value is not None]
+        if not deadlines:
+            return
+        generation = self._timer_generation
 
         @callback
         def due(now: datetime) -> None:
-            if self._stopped or generation != self._generation or not self.firing:
+            if self._stopped or generation != self._timer_generation:
                 return
-            self._queue_reminder()
-            self._schedule()
+            self._process_due()
+            self._arm()
             self._publish()
 
         self._cancel_timer = async_track_point_in_utc_time(
-            self.hass, due, self.next_notification
+            self.hass, due, min(deadlines)
         )
 
     @callback
@@ -211,7 +353,12 @@ class AlertRuntime:
 
     @callback
     def _queue_reminder(self) -> None:
-        if self.acknowledged or self._reminder_pending == self._generation:
+        if (
+            self.acknowledged
+            or self.snoozed_until
+            or self.source_suspended
+            or self._reminder_pending == self._generation
+        ):
             return
         self._reminder_pending = self._generation
         self._task(self._deliver(self.config, self._generation))
@@ -228,6 +375,8 @@ class AlertRuntime:
                     generation == self._generation
                     and self.firing
                     and not self.acknowledged
+                    and not self.snoozed_until
+                    and not self.source_suspended
                 )
             )
 
@@ -238,8 +387,14 @@ class AlertRuntime:
                 if not done:
                     self.attempted = True
                     self.last_attempt = dt_util.utcnow()
+                    self._publish()
                 self.errors = await async_notify(
-                    self.hass, config, done=done, context=context, valid=valid
+                    self.hass,
+                    config,
+                    done=done,
+                    context=context,
+                    valid=valid,
+                    actions=self.notification_actions() if not done else None,
                 )
                 self._publish()
         finally:
@@ -252,32 +407,76 @@ class AlertRuntime:
             raise ServiceValidationError("This alert cannot be acknowledged")
         self._context = context
         self.acknowledged = acknowledged
+        self.snoozed_until = None
+        self._arm()
         self._publish()
-
-    def snooze(self, minutes: float) -> None:
-        if not self.config.enable_snooze or not self.firing:
-            raise ServiceValidationError("Snooze is unavailable for this alert")
-        if minutes <= 0:
-            raise ServiceValidationError("Snooze duration must be positive")
-        self.snoozed_until = dt_util.utcnow() + timedelta(minutes=minutes)
-        self.acknowledged = True
-        self._publish()
-        self._schedule_snooze_expiry()
-
-    async def async_snooze(self, minutes: float = 30) -> None:
-        self.snooze(minutes)
 
     @callback
-    def _schedule_snooze_expiry(self) -> None:
-        if not self.snoozed_until:
+    def snooze(
+        self, minutes: float | None = None, context: Context | None = None
+    ) -> None:
+        if not self.config.enable_snooze or not self.firing:
+            raise ServiceValidationError("Snooze is unavailable for this alert")
+        minutes = self.config.snooze_minutes if minutes is None else minutes
+        if (
+            isinstance(minutes, bool)
+            or not isinstance(minutes, int | float)
+            or not isfinite(minutes)
+            or not 0 < minutes <= 10080
+        ):
+            raise ServiceValidationError(
+                "Snooze duration must be between 0 and 10080 minutes (exclusive of 0)"
+            )
+        self._context = context
+        self.snoozed_until = dt_util.utcnow() + timedelta(minutes=minutes)
+        self._arm()
+        self._publish()
+
+    @callback
+    def cancel_snooze(self) -> None:
+        self.snoozed_until = None
+        self._arm()
+        self._publish()
+
+    def notification_actions(self) -> list[dict[str, str]]:
+        if not self.config.action_buttons or not self.entry_id or not self.firing:
+            return []
+        prefix = (
+            f"MODERN_ALERTS:{self.entry_id}:{self.incident_id}:{self.action_token}:"
+        )
+        actions = []
+        if self.config.can_acknowledge:
+            actions.append({"action": prefix + "ACK", "title": "Acknowledge"})
+        if self.config.enable_snooze:
+            actions.append({"action": prefix + "SNOOZE", "title": "Snooze"})
+        if self.status_entity_id:
+            actions.append(
+                {
+                    "action": "URI",
+                    "title": "Open alert",
+                    "uri": f"entityId:{self.status_entity_id}",
+                }
+            )
+        return actions
+
+    @callback
+    def handle_mobile_action(self, action: str, context: Context | None = None) -> None:
+        if self._stopped or not self.firing or not self.attempted:
             return
-        generation = self._generation
-        def wake(_: datetime) -> None:
-            if generation == self._generation and self.firing:
-                self.snoozed_until = None
-                self.acknowledged = False
-                self._publish()
-        async_track_point_in_utc_time(self.hass, wake, self.snoozed_until)
+        valid = {
+            item["action"]
+            for item in self.notification_actions()
+            if item["action"] != "URI"
+        }
+        if action not in valid:
+            return
+        if action.endswith(":ACK"):
+            self.acknowledge(True, context)
+        else:
+            self.snooze(context=context)
+        # Repeated callbacks and controls from older notifications become inert.
+        self.action_token = uuid4().hex
+        self._publish()
 
     async def async_test_notification(self, context: Context | None = None) -> None:
         """Explicit test: no incident bookkeeping or resolution eligibility."""
@@ -295,9 +494,13 @@ class AlertRuntime:
 
     async def async_stop(self) -> None:
         """Unload quietly; cancel timers, listeners, and pending deliveries."""
+        if self._stopped:
+            return
+        snapshot = self.snapshot()
         self._stopped = True
         self._generation += 1
         self._cancel()
+        self.next_notification = None
         if self._unsubscribe:
             self._unsubscribe()
             self._unsubscribe = None
@@ -306,19 +509,37 @@ class AlertRuntime:
             task.cancel()
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
+        await self.async_save(snapshot)
 
     async def async_update_config(self, config: AlertConfig) -> None:
         """Apply edits without losing acknowledgement for an unchanged condition."""
         old = self.config
-        condition_changed = (old.entity_id, old.state) != (
-            config.entity_id,
-            config.state,
-        )
+        old_condition = self._condition()
+        snapshot = self.snapshot()
         await self.async_stop()
         self.config = config
+        if old.restore_state and not config.restore_state:
+            await self.async_save()
+        condition_changed = old_condition != self._condition()
+        deadline = snapshot["next_notification"]
+        self.next_notification = dt_util.parse_datetime(deadline) if deadline else None
+        self.source_suspended = False
         if condition_changed:
             self.firing = self.acknowledged = self.attempted = False
             self.next_index = 0
+            self.next_notification = self.pending_due = self.pending_active = None
+            self.snoozed_until = None
+            self.incident_id = self.action_token = ""
+        if old.repeat != config.repeat:
+            self.next_notification = None
+            self.next_index = 0
+        if (old.activation_delay, old.recovery_delay) != (
+            config.activation_delay,
+            config.recovery_delay,
+        ):
+            self.pending_due = self.pending_active = None
+        if not config.enable_snooze:
+            self.snoozed_until = None
         if not config.can_acknowledge:
             self.acknowledged = False
         self.next_index = min(self.next_index, len(config.repeat) - 1)

@@ -30,6 +30,7 @@ class AlertStatus(ModernAlertEntity, SensorEntity):
 
     @property
     def native_value(self) -> str:
+        self.runtime.status_entity_id = self.entity_id
         return self.runtime.state
 
     @property
@@ -42,6 +43,10 @@ class AlertStatus(ModernAlertEntity, SensorEntity):
             "next_notification": runtime.next_notification,
             "last_attempt": runtime.last_attempt,
             "notification_errors": runtime.errors,
+            "snoozed_until": runtime.snoozed_until,
+            "source_suspended": runtime.source_suspended,
+            "pending_transition": runtime.pending_active,
+            "pending_deadline": runtime.pending_due,
         }
 
     async def async_turn_off(self) -> None:
@@ -55,3 +60,9 @@ class AlertStatus(ModernAlertEntity, SensorEntity):
 
     async def async_test_notification(self) -> None:
         await self.runtime.async_test_notification(self._context)
+
+    async def async_snooze(self, minutes: float | None = None) -> None:
+        self.runtime.snooze(minutes, self._context)
+
+    async def async_cancel_snooze(self) -> None:
+        self.runtime.cancel_snooze()
