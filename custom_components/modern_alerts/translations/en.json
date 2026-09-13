@@ -4,14 +4,24 @@
     "step": {
       "user": {
         "title": "Alert condition",
-        "description": "Watch one entity for an exact state. For compound conditions, first create a Template binary sensor helper. Multiple alerts may watch the same entity.",
+        "description": "Watch an exact state, or set one numeric problem threshold. Numeric thresholds use the source entity's units; no unit conversion is performed. For compound conditions, select a Template binary sensor helper.",
         "data": {
           "name": "Alert name",
           "entity_id": "Entity to watch",
-          "state": "Problem state"
+          "state": "Problem state",
+          "numeric_below": "Problem below",
+          "numeric_above": "Problem above",
+          "numeric_recover_above": "Recover above (for a below threshold)",
+          "numeric_recover_below": "Recover below (for an above threshold)",
+          "numeric_unit": "Expected numeric unit (optional)"
         },
         "data_description": {
-          "state": "Underlying state string, such as on, open, problem, or home. This is not the translated display label."
+          "state": "Underlying state string, such as on or open. Ignored when a numeric problem threshold is set.",
+          "numeric_below": "Optional. Start when the value is strictly below this number. Leave both problem thresholds empty to match the state instead.",
+          "numeric_above": "Optional. Start when the value is strictly above this number. Choose only one problem threshold.",
+          "numeric_recover_above": "Optional. Keep the incident active until strictly above this value. Must be at least the problem-below threshold.",
+          "numeric_recover_below": "Optional. Keep the incident active until strictly below this value. Must be at most the problem-above threshold.",
+          "numeric_unit": "Exact unit attribute, for example %, °C, or °F. A missing or different unit suspends evaluation. Empty accepts the source's current units."
         }
       },
       "timing": {
@@ -21,12 +31,26 @@
           "intervals": "Repeat intervals (minutes)",
           "skip_first": "Delay the first notification",
           "can_acknowledge": "Allow acknowledgement",
-          "evaluate_on_start": "Evaluate the existing condition on startup"
+          "evaluate_on_start": "Evaluate the existing condition on startup",
+          "restore_state": "Restore incidents after restart or reload",
+          "activation_delay": "Sustained problem delay (seconds)",
+          "recovery_delay": "Sustained recovery delay (seconds)",
+          "unavailable_policy": "When the source is unavailable",
+          "enable_snooze": "Allow temporary snooze",
+          "snooze_minutes": "Default snooze duration (minutes)",
+          "action_buttons": "Add Companion phone controls"
         },
         "data_description": {
           "intervals": "One row gives a fixed interval. For example, 15, 30, 60 uses those delays in sequence, then repeats every 60 minutes. Minimum 0.016 minutes.",
           "skip_first": "When enabled, wait the first interval before notifying. Otherwise notify immediately when the problem begins.",
-          "evaluate_on_start": "Optional improvement: an already-matching source starts an incident when this integration loads. Off matches built-in Alert behavior. Incidents and acknowledgement are not restored after a restart or reload."
+          "evaluate_on_start": "Start a new incident if the source already matches when the integration loads. Off preserves built-in Alert startup behavior. Restoring a saved incident takes precedence.",
+          "restore_state": "Save acknowledgement, snooze, incident identity and deadlines. After source readiness, send at most one overdue reminder and resume the schedule. Off starts fresh after reload.",
+          "activation_delay": "Require the problem to remain true for this long before creating an incident. Zero starts immediately. The first repeat interval begins after this delay.",
+          "recovery_delay": "Require the recovery condition to remain true for this long before resolving. Reminders continue during this delay.",
+          "unavailable_policy": "Resolve treats a nonmatching unknown/unavailable state as clear. Suspend preserves the incident and pauses reminders until usable data returns. Invalid numeric values always suspend.",
+          "enable_snooze": "Allow the Snooze button and action. Snooze is separate from acknowledgement; reminders continue advancing silently.",
+          "snooze_minutes": "Used by the device and phone buttons, and by the snooze action when no duration is supplied. Maximum one week.",
+          "action_buttons": "Add incident-specific Acknowledge, Snooze, and Open alert controls to direct mobile_app notify actions. Test and resolution messages have no generated controls. Automatic controls replace any actions in extra data for these destinations."
         }
       },
       "notifications": {
@@ -59,7 +83,7 @@
       },
       "review": {
         "title": "Review alert",
-        "description": "**{name}**\n\nWatch `{entity}` for `{state}`. Current source state: `{current}`.\n\nFirst notification: {first}. Repeat delays in minutes: {schedule}; the final delay repeats indefinitely.\n\nDestinations: {destinations}\n\nResolution: {completion}\n\nSubmit to save. No test notification is sent automatically. If startup evaluation is enabled, an existing problem can send a real alert. Use the Test notification button on the alert device to test explicitly."
+        "description": "**{name}**\n\nWatch `{entity}` for `{state}`. Current source state and unit: `{current}`. Recovery: {recovery}.\n\nFirst notification after activation: {first}. Repeat delays in minutes: {schedule}; the final delay repeats indefinitely.\n\n{reliability}\n\nDestinations: {destinations}\n\nResolution: {completion}\n\nSubmit to save. No test notification is sent automatically. Startup evaluation or restored overdue reminders may send a real alert. Use the Test notification button on the alert device to test explicitly."
       }
     },
     "error": {
@@ -70,21 +94,35 @@
       "invalid_destination": "Use a specific notify action name or a notify entity. notify.notify and notify.send_message are not legacy destination names.",
       "invalid_data": "Extra data must be a YAML mapping, not a list or text.",
       "entity_data_unsupported": "Notify entities do not accept extra data in Home Assistant 2026.9.2. Clear this field, or choose only legacy notify actions.",
-      "invalid_boolean": "Select an on/off value."
+      "invalid_boolean": "Select an on/off value.",
+      "invalid_duration": "Enter a finite nonnegative delay that fits a valid date. Snooze must be greater than zero and at most 10080 minutes.",
+      "invalid_policy": "Select Resolve or Suspend.",
+      "invalid_number": "Enter a finite number.",
+      "incompatible_thresholds": "Choose one problem threshold and its corresponding recovery threshold. Recovery must be at or beyond the problem threshold in the recovery direction."
     }
   },
   "options": {
     "step": {
       "init": {
         "title": "Alert condition",
-        "description": "Watch one entity for an exact state. For compound conditions, first create a Template binary sensor helper. Multiple alerts may watch the same entity.",
+        "description": "Watch an exact state, or set one numeric problem threshold. Numeric thresholds use the source entity's units; no unit conversion is performed. For compound conditions, select a Template binary sensor helper.",
         "data": {
           "name": "Alert name",
           "entity_id": "Entity to watch",
-          "state": "Problem state"
+          "state": "Problem state",
+          "numeric_below": "Problem below",
+          "numeric_above": "Problem above",
+          "numeric_recover_above": "Recover above (for a below threshold)",
+          "numeric_recover_below": "Recover below (for an above threshold)",
+          "numeric_unit": "Expected numeric unit (optional)"
         },
         "data_description": {
-          "state": "Underlying state string, such as on, open, problem, or home. This is not the translated display label."
+          "state": "Underlying state string, such as on or open. Ignored when a numeric problem threshold is set.",
+          "numeric_below": "Optional. Start when the value is strictly below this number. Leave both problem thresholds empty to match the state instead.",
+          "numeric_above": "Optional. Start when the value is strictly above this number. Choose only one problem threshold.",
+          "numeric_recover_above": "Optional. Keep the incident active until strictly above this value. Must be at least the problem-below threshold.",
+          "numeric_recover_below": "Optional. Keep the incident active until strictly below this value. Must be at most the problem-above threshold.",
+          "numeric_unit": "Exact unit attribute, for example %, °C, or °F. A missing or different unit suspends evaluation. Empty accepts the source's current units."
         }
       },
       "timing": {
@@ -94,12 +132,26 @@
           "intervals": "Repeat intervals (minutes)",
           "skip_first": "Delay the first notification",
           "can_acknowledge": "Allow acknowledgement",
-          "evaluate_on_start": "Evaluate the existing condition on startup"
+          "evaluate_on_start": "Evaluate the existing condition on startup",
+          "restore_state": "Restore incidents after restart or reload",
+          "activation_delay": "Sustained problem delay (seconds)",
+          "recovery_delay": "Sustained recovery delay (seconds)",
+          "unavailable_policy": "When the source is unavailable",
+          "enable_snooze": "Allow temporary snooze",
+          "snooze_minutes": "Default snooze duration (minutes)",
+          "action_buttons": "Add Companion phone controls"
         },
         "data_description": {
           "intervals": "One row gives a fixed interval. For example, 15, 30, 60 uses those delays in sequence, then repeats every 60 minutes. Minimum 0.016 minutes.",
           "skip_first": "When enabled, wait the first interval before notifying. Otherwise notify immediately when the problem begins.",
-          "evaluate_on_start": "Optional improvement: an already-matching source starts an incident when this integration loads. Off matches built-in Alert behavior. Incidents and acknowledgement are not restored after a restart or reload."
+          "evaluate_on_start": "Start a new incident if the source already matches when the integration loads. Off preserves built-in Alert startup behavior. Restoring a saved incident takes precedence.",
+          "restore_state": "Save acknowledgement, snooze, incident identity and deadlines. After source readiness, send at most one overdue reminder and resume the schedule. Off starts fresh after reload.",
+          "activation_delay": "Require the problem to remain true for this long before creating an incident. Zero starts immediately. The first repeat interval begins after this delay.",
+          "recovery_delay": "Require the recovery condition to remain true for this long before resolving. Reminders continue during this delay.",
+          "unavailable_policy": "Resolve treats a nonmatching unknown/unavailable state as clear. Suspend preserves the incident and pauses reminders until usable data returns. Invalid numeric values always suspend.",
+          "enable_snooze": "Allow the Snooze button and action. Snooze is separate from acknowledgement; reminders continue advancing silently.",
+          "snooze_minutes": "Used by the device and phone buttons, and by the snooze action when no duration is supplied. Maximum one week.",
+          "action_buttons": "Add incident-specific Acknowledge, Snooze, and Open alert controls to direct mobile_app notify actions. Test and resolution messages have no generated controls. Automatic controls replace any actions in extra data for these destinations."
         }
       },
       "notifications": {
@@ -132,7 +184,7 @@
       },
       "review": {
         "title": "Review alert",
-        "description": "**{name}**\n\nWatch `{entity}` for `{state}`. Current source state: `{current}`.\n\nFirst notification: {first}. Repeat delays in minutes: {schedule}; the final delay repeats indefinitely.\n\nDestinations: {destinations}\n\nResolution: {completion}\n\nSubmit to save. No test notification is sent automatically. If startup evaluation is enabled, an existing problem can send a real alert. Use the Test notification button on the alert device to test explicitly."
+        "description": "**{name}**\n\nWatch `{entity}` for `{state}`. Current source state and unit: `{current}`. Recovery: {recovery}.\n\nFirst notification after activation: {first}. Repeat delays in minutes: {schedule}; the final delay repeats indefinitely.\n\n{reliability}\n\nDestinations: {destinations}\n\nResolution: {completion}\n\nSubmit to save. No test notification is sent automatically. Startup evaluation or restored overdue reminders may send a real alert. Use the Test notification button on the alert device to test explicitly."
       }
     },
     "error": {
@@ -143,7 +195,11 @@
       "invalid_destination": "Use a specific notify action name or a notify entity. notify.notify and notify.send_message are not legacy destination names.",
       "invalid_data": "Extra data must be a YAML mapping, not a list or text.",
       "entity_data_unsupported": "Notify entities do not accept extra data in Home Assistant 2026.9.2. Clear this field, or choose only legacy notify actions.",
-      "invalid_boolean": "Select an on/off value."
+      "invalid_boolean": "Select an on/off value.",
+      "invalid_duration": "Enter a finite nonnegative delay that fits a valid date. Snooze must be greater than zero and at most 10080 minutes.",
+      "invalid_policy": "Select Resolve or Suspend.",
+      "invalid_number": "Enter a finite number.",
+      "incompatible_thresholds": "Choose one problem threshold and its corresponding recovery threshold. Recovery must be at or beyond the problem threshold in the recovery direction."
     }
   },
   "entity": {
@@ -171,6 +227,12 @@
       },
       "test_notification": {
         "name": "Test notification"
+      },
+      "snooze": {
+        "name": "Snooze"
+      },
+      "cancel_snooze": {
+        "name": "Cancel snooze"
       }
     }
   },
@@ -181,7 +243,7 @@
     },
     "unacknowledge": {
       "name": "Resume reminders",
-      "description": "Resume on the existing reminder schedule. Does not send immediately or create an incident."
+      "description": "Clear acknowledgement and snooze. Resume on the existing reminder schedule without sending immediately."
     },
     "turn_off": {
       "name": "Acknowledge (turn off)",
@@ -198,6 +260,20 @@
     "test_notification": {
       "name": "Test notification",
       "description": "Send the current alert message explicitly, without changing incident or resolution eligibility."
+    },
+    "snooze": {
+      "name": "Snooze",
+      "description": "Silence reminders temporarily without clearing acknowledgement. Omit minutes to use the alert default.",
+      "fields": {
+        "minutes": {
+          "name": "Minutes",
+          "description": "Duration greater than zero and at most 10080 minutes."
+        }
+      }
+    },
+    "cancel_snooze": {
+      "name": "Cancel snooze",
+      "description": "End temporary silence without clearing acknowledgement or changing the reminder schedule."
     }
   }
 }

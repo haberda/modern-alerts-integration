@@ -42,16 +42,23 @@ test_notification:
       domain: sensor
 snooze:
   name: Snooze
-  description: Silence reminders for the selected number of minutes while the problem remains active.
+  description: Silence reminders temporarily. Omit minutes to use this alert's configured default. Acknowledgement is preserved.
   fields:
     minutes:
       name: Minutes
       required: false
       selector:
         number:
-          min: 1
+          min: 0.016
           max: 10080
-          step: 1
+          step: any
+  target:
+    entity:
+      integration: modern_alerts
+      domain: sensor
+cancel_snooze:
+  name: Cancel snooze
+  description: End temporary silence without clearing acknowledgement or resetting the reminder schedule.
   target:
     entity:
       integration: modern_alerts

@@ -237,3 +237,136 @@ async def test_snooze_service_target_and_cancel(hass, notifications, freezer):
         DOMAIN, "cancel_snooze", {"entity_id": status}, blocking=True
     )
     assert entry.runtime_data.snoozed_until is None
+
+
+async def test_unit_change_suspends_numeric_incident(hass, make_runtime, notifications):
+    runtime = make_runtime(numeric_below=15, numeric_recover_above=20, numeric_unit="%")
+    await set_state(hass, "14", attributes={"unit_of_measurement": "%"})
+    assert runtime.firing
+    await set_state(hass, "30", attributes={"unit_of_measurement": "V"})
+    assert runtime.firing and runtime.source_suspended and len(notifications) == 1
+    await set_state(hass, "30", attributes={"unit_of_measurement": "%"})
+    assert not runtime.firing and len(notifications) == 2
+
+
+@pytest.mark.parametrize("evaluate", [False, True])
+async def test_reload_without_restore_starts_fresh(hass, notifications, evaluate):
+    entry = await setup_alert(hass, evaluate_on_start=evaluate)
+    await set_state(hass, "on")
+    entry.runtime_data.acknowledge(True)
+    assert await hass.config_entries.async_reload(entry.entry_id)
+    await hass.async_block_till_done()
+    assert entry.runtime_data.state == ("on" if evaluate else "idle")
+    assert len(notifications) == (2 if evaluate else 1)
+
+
+async def test_pending_recovery_survives_reload(hass, notifications, freezer):
+    entry = await setup_alert(hass, restore_state=True, recovery_delay=120)
+    await set_state(hass, "on")
+    await set_state(hass, "off")
+    deadline = entry.runtime_data.pending_due
+    await advance(hass, freezer, 1)
+    assert await hass.config_entries.async_reload(entry.entry_id)
+    await hass.async_block_till_done()
+    assert entry.runtime_data.pending_due == deadline
+    await advance(hass, freezer, 1)
+    assert not entry.runtime_data.firing and len(notifications) == 2
+
+
+async def test_restore_clear_source_resolves_once(hass, notifications, freezer):
+    entry = await setup_alert(hass, restore_state=True)
+    await set_state(hass, "on")
+    assert await hass.config_entries.async_unload(entry.entry_id)
+    await set_state(hass, "off")
+    await advance(hass, freezer, 60)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    assert not entry.runtime_data.firing
+    assert len(notifications) == 2 and notifications[-1].data["message"] == "Closed"
+    assert await hass.config_entries.async_reload(entry.entry_id)
+    await hass.async_block_till_done()
+    assert len(notifications) == 2
+
+
+async def test_edits_preserve_deadline_and_reset_changed_condition(
+    hass, make_runtime, notifications, freezer
+):
+    runtime = make_runtime(numeric_below=15, numeric_recover_above=20)
+    await set_state(hass, "14")
+    deadline = runtime.next_notification
+    runtime.acknowledge(True)
+    await advance(hass, freezer, 1)
+    values = runtime.config.as_dict()
+    await runtime.async_update_config(
+        AlertConfig.from_dict({**values, "name": "Renamed"}, hass)
+    )
+    assert runtime.next_notification == deadline and runtime.acknowledged
+    await runtime.async_update_config(
+        AlertConfig.from_dict({**values, "numeric_below": 10}, hass)
+    )
+    assert not runtime.firing and runtime.next_notification is None
+    assert len(notifications) == 1  # No misleading completion after a condition edit.
+    await set_state(hass, "9")
+    assert runtime.firing and not runtime.acknowledged
+
+
+async def test_phone_snooze_permissions_and_disabled_controls(
+    hass, notifications, freezer
+):
+    calls = async_mock_service(hass, "notify", "mobile_app_phone")
+    entry = await setup_alert(
+        hass,
+        action_buttons=True,
+        can_acknowledge=False,
+        snooze_minutes=7,
+        notifiers=["mobile_app_phone"],
+    )
+    await set_state(hass, "on")
+    actions = calls[-1].data["data"]["actions"]
+    assert [a["title"] for a in actions] == ["Snooze", "Open alert"]
+    hass.bus.async_fire(
+        "mobile_app_notification_action", {"action": actions[0]["action"]}
+    )
+    await hass.async_block_till_done()
+    assert entry.runtime_data.snoozed_until == dt_util.utcnow() + timedelta(minutes=7)
+    entry.runtime_data.cancel_snooze()
+    hass.config_entries.async_update_entry(
+        entry, options={**entry.data, "action_buttons": False}
+    )
+    await hass.async_block_till_done()
+    hass.bus.async_fire(
+        "mobile_app_notification_action", {"action": actions[0]["action"]}
+    )
+    await hass.async_block_till_done()
+    assert entry.runtime_data.snoozed_until is None
+
+
+async def test_device_snooze_and_resume_buttons(hass, notifications):
+    entry = await setup_alert(hass)
+    await set_state(hass, "on")
+    for key in ("snooze", "cancel_snooze", "snooze", "unacknowledge"):
+        await hass.services.async_call(
+            "button",
+            "press",
+            {"entity_id": entity_id(hass, entry, "button", key)},
+            blocking=True,
+        )
+        await hass.async_block_till_done()
+        assert bool(entry.runtime_data.snoozed_until) == (key == "snooze")
+    assert len(notifications) == 1
+
+
+async def test_unload_cancels_pending_activation_and_snooze(
+    hass, make_runtime, notifications, freezer
+):
+    runtime = make_runtime(activation_delay=60)
+    await set_state(hass, "on")
+    await runtime.async_stop()
+    await advance(hass, freezer, 2)
+    assert not runtime.firing and not notifications
+    other = make_runtime(evaluate_on_start=True)
+    await hass.async_block_till_done()
+    other.snooze(1)
+    await other.async_stop()
+    await advance(hass, freezer, 60)
+    assert len(notifications) == 1 and other._cancel_timer is None

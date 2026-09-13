@@ -162,3 +162,55 @@ async def test_arbitrary_state_and_duplicate_sources(hass, state):
         {"name": "Another alert", "entity_id": "binary_sensor.garage", "state": state},
     )
     assert_form(result, "timing")
+
+
+async def test_numeric_options_can_be_cleared(hass):
+    data = AlertConfig(
+        name="Battery",
+        entity_id="sensor.battery",
+        numeric_below=15,
+        numeric_recover_above=20,
+        numeric_unit="%",
+        restore_state=True,
+        snooze_minutes=12,
+    ).as_dict()
+    entry = MockConfigEntry(domain=DOMAIN, title="Battery", data=data)
+    entry.add_to_hass(hass)
+    manager = hass.config_entries.options
+    result = await manager.async_init(entry.entry_id)
+    assert_form(result, "init")
+    result = await configure(
+        manager,
+        result,
+        {"name": "Battery", "entity_id": "sensor.battery", "state": "low"},
+    )
+    result = await configure(
+        manager,
+        result,
+        {"intervals": [{"minutes": 5}], "restore_state": True, "snooze_minutes": 12},
+    )
+    result = await configure(manager, result, {})
+    result = await configure(manager, result, {})
+    result = await configure(manager, result, {})
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert entry.options["numeric_below"] is None
+    assert entry.options["numeric_recover_above"] is None
+    assert entry.options["numeric_unit"] is None
+    assert entry.options["restore_state"] is True
+
+
+async def test_invalid_hysteresis_has_field_error(hass):
+    manager = hass.config_entries.flow
+    result = await begin(hass)
+    result = await configure(
+        manager,
+        result,
+        {
+            "name": "Battery",
+            "entity_id": "sensor.battery",
+            "numeric_below": 15,
+            "numeric_recover_above": 10,
+        },
+    )
+    assert result["errors"] == {"numeric_recover_above": "incompatible_thresholds"}
+    assert_form(result, "user")

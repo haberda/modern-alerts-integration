@@ -21,22 +21,43 @@ class AlertFlowSteps:
 
     async def _basics(self, step_id, user_input=None):
         errors = {}
+        numeric_fields = (
+            "numeric_below",
+            "numeric_above",
+            "numeric_recover_above",
+            "numeric_recover_below",
+            "numeric_unit",
+        )
         if user_input is not None:
+            # Clearing optional numeric fields switches back to exact state matching.
+            values = {key: None for key in numeric_fields} | user_input
             try:
-                AlertConfig.from_dict(user_input, self.hass)
+                AlertConfig.from_dict(values, self.hass)
             except InvalidConfig as err:
                 errors[err.field] = err.code
             else:
-                self._values.update(user_input)
+                self._values.update(values)
                 return await self.async_step_timing()
         fields = {
             vol.Required("name"): selector.TextSelector(),
             vol.Required("entity_id"): selector.EntitySelector(),
             vol.Required("state", default="on"): selector.TextSelector(),
         }
+        for key in numeric_fields[:-1]:
+            fields[vol.Optional(key)] = selector.NumberSelector(
+                {"step": "any", "mode": "box"}
+            )
+        fields[vol.Optional("numeric_unit")] = selector.TextSelector()
         return self.async_show_form(
             step_id=step_id,
-            data_schema=self._schema(fields, user_input or self._values),
+            data_schema=self._schema(
+                fields,
+                {
+                    key: value
+                    for key, value in (user_input or self._values).items()
+                    if value is not None
+                },
+            ),
             errors=errors,
         )
 
@@ -47,6 +68,8 @@ class AlertFlowSteps:
             "skip_first": self._values.get("skip_first", False),
             "can_acknowledge": self._values.get("can_acknowledge", True),
             "evaluate_on_start": self._values.get("evaluate_on_start", False),
+            "restore_state": self._values.get("restore_state", False),
+            "snooze_minutes": self._values.get("snooze_minutes", 30),
             "activation_delay": self._values.get("activation_delay", 0),
             "recovery_delay": self._values.get("recovery_delay", 0),
             "unavailable_policy": self._values.get("unavailable_policy", "resolve"),
@@ -91,12 +114,28 @@ class AlertFlowSteps:
             vol.Required("skip_first", default=False): selector.BooleanSelector(),
             vol.Required("can_acknowledge", default=True): selector.BooleanSelector(),
             vol.Required(
-            "evaluate_on_start", default=False
+                "evaluate_on_start", default=False
             ): selector.BooleanSelector(),
-            vol.Required("activation_delay", default=0): selector.NumberSelector({"min": 0, "step": "any", "unit_of_measurement": "seconds"}),
-            vol.Required("recovery_delay", default=0): selector.NumberSelector({"min": 0, "step": "any", "unit_of_measurement": "seconds"}),
-            vol.Required("unavailable_policy", default="resolve"): selector.SelectSelector({"options": ["resolve", "suspend"]}),
+            vol.Required("activation_delay", default=0): selector.NumberSelector(
+                {"min": 0, "step": "any", "unit_of_measurement": "seconds"}
+            ),
+            vol.Required("recovery_delay", default=0): selector.NumberSelector(
+                {"min": 0, "step": "any", "unit_of_measurement": "seconds"}
+            ),
+            vol.Required(
+                "unavailable_policy", default="resolve"
+            ): selector.SelectSelector({"options": ["resolve", "suspend"]}),
             vol.Required("enable_snooze", default=True): selector.BooleanSelector(),
+            vol.Required("restore_state", default=False): selector.BooleanSelector(),
+            vol.Required("snooze_minutes", default=30): selector.NumberSelector(
+                {
+                    "min": 0.016,
+                    "max": 10080,
+                    "step": "any",
+                    "mode": "box",
+                    "unit_of_measurement": "minutes",
+                }
+            ),
             vol.Required("action_buttons", default=False): selector.BooleanSelector(),
         }
         return self.async_show_form(
@@ -196,8 +235,24 @@ class AlertFlowSteps:
             description_placeholders={
                 "name": config.name,
                 "entity": config.entity_id,
-                "state": config.state,
-                "current": source.state if source else "not currently available",
+                "state": (
+                    f"below {config.numeric_below:g}"
+                    if config.numeric_below is not None
+                    else f"above {config.numeric_above:g}"
+                    if config.numeric_above is not None
+                    else config.state
+                ),
+                "current": f"{source.state} {source.attributes.get('unit_of_measurement', '')}".strip()
+                if source
+                else "not currently available",
+                "reliability": f"Activation/recovery delays: {config.activation_delay:g}/{config.recovery_delay:g} seconds. Restore state: {config.restore_state}. Unavailable source: {config.unavailable_policy}. Default snooze: {config.snooze_minutes:g} minutes. Phone controls: {config.action_buttons}.",
+                "recovery": (
+                    f"above {config.numeric_recover_above:g}"
+                    if config.numeric_recover_above is not None
+                    else f"below {config.numeric_recover_below:g}"
+                    if config.numeric_recover_below is not None
+                    else "when the problem condition clears"
+                ),
                 "schedule": intervals,
                 "first": f"after {config.repeat[0]:g} minutes"
                 if config.skip_first

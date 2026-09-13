@@ -94,3 +94,69 @@ async def test_frontend_workflow(hass, hass_client, notifications):
     assert response.status == 200
     await hass.async_block_till_done()
     assert hass.config_entries.async_get_entry(entry.entry_id) is None
+
+
+async def test_numeric_reliability_http_workflow(
+    hass, hass_client, notifications, freezer
+):
+    from test_runtime import advance
+
+    assert await async_setup_component(hass, "http", {})
+    config_entries.async_setup(hass)
+    client = await hass_client()
+    hass.states.async_set("sensor.battery", "30", {"unit_of_measurement": "%"})
+    response = await client.post(
+        "/api/config/config_entries/flow", json={"handler": DOMAIN}
+    )
+    result = await response.json()
+    assert {field["name"] for field in result["data_schema"]} >= {
+        "numeric_below",
+        "numeric_unit",
+    }
+    for values in [
+        {
+            "name": "Battery",
+            "entity_id": "sensor.battery",
+            "numeric_below": 15,
+            "numeric_recover_above": 20,
+            "numeric_unit": "%",
+        },
+        {
+            "intervals": [{"minutes": 1}],
+            "activation_delay": 60,
+            "recovery_delay": 60,
+            "restore_state": True,
+            "unavailable_policy": "suspend",
+            "enable_snooze": True,
+            "snooze_minutes": 5,
+            "action_buttons": True,
+        },
+        {"notifiers": ["phone"]},
+        {"done_message": "Recovered"},
+        {},
+    ]:
+        response = await client.post(
+            f"/api/config/config_entries/flow/{result['flow_id']}", json=values
+        )
+        assert response.status == 200, await response.text()
+        result = await response.json()
+    assert result["type"] == "create_entry"
+    await hass.async_block_till_done()
+    entry = hass.config_entries.async_entries(DOMAIN)[0]
+    assert entry.data["restore_state"] and entry.data["numeric_below"] == 15
+    hass.states.async_set("sensor.battery", "14", {"unit_of_measurement": "%"})
+    await hass.async_block_till_done()
+    assert not entry.runtime_data.firing
+    await advance(hass, freezer, 1)
+    assert entry.runtime_data.firing and len(notifications) == 1
+    # Generic notify actions never receive Companion-only generated data.
+    assert "data" not in notifications[-1].data
+    hass.states.async_set("sensor.battery", "21", {"unit_of_measurement": "%"})
+    await hass.async_block_till_done()
+    await advance(hass, freezer, 1)
+    assert (
+        not entry.runtime_data.firing
+        and notifications[-1].data["message"] == "Recovered"
+    )
+    response = await client.delete(f"/api/config/config_entries/entry/{entry.entry_id}")
+    assert response.status == 200
