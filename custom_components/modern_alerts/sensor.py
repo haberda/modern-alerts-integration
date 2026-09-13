@@ -47,6 +47,11 @@ class AlertStatus(ModernAlertEntity, SensorEntity):
             "source_suspended": runtime.source_suspended,
             "pending_transition": runtime.pending_active,
             "pending_deadline": runtime.pending_due,
+            "active_outputs": runtime.outputs.active,
+            "output_errors": runtime.outputs.errors,
+            "configured_outputs": {
+                item["id"]: item["name"] for item in runtime.config.outputs
+            },
         }
 
     async def async_turn_off(self) -> None:
@@ -66,3 +71,9 @@ class AlertStatus(ModernAlertEntity, SensorEntity):
 
     async def async_cancel_snooze(self) -> None:
         self.runtime.cancel_snooze()
+
+    async def async_test_output(self, output_id: str | None = None) -> None:
+        await self.runtime.async_test_output(output_id)
+
+    async def async_stop_outputs(self) -> None:
+        await self.runtime.async_stop_outputs()

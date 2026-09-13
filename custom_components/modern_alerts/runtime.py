@@ -23,6 +23,7 @@ from homeassistant.util import dt as dt_util
 
 from .models import AlertConfig
 from .notifications import async_notify
+from .outputs import OutputManager
 
 
 class AlertRuntime:
@@ -63,6 +64,8 @@ class AlertRuntime:
         self._timer_generation = 0
         self._restored = False
         self._awaiting_source = False
+        self.outputs = OutputManager(hass, self._publish)
+        self.test_output_id: str | None = None
 
     @property
     def state(self) -> str:
@@ -123,6 +126,7 @@ class AlertRuntime:
             )
         }
         data.update(schema=2, condition=self._condition())
+        data["outputs_seen"] = sorted(self.outputs.seen)
         for key in (
             "next_notification",
             "last_attempt",
@@ -178,12 +182,18 @@ class AlertRuntime:
             ):
                 raise ValueError
             values["pending_active"] = pending
+            seen = data.get("outputs_seen", [])
+            if not isinstance(seen, list) or any(
+                not isinstance(key, str) for key in seen
+            ):
+                raise ValueError
         except KeyError, TypeError, ValueError, OverflowError:
             self.errors = {"restore": "invalid_snapshot"}
             return
         for key, value in values.items():
             setattr(self, key, value)
         self._restored = True
+        self.outputs.seen = set(seen)
 
     async def async_save(self, snapshot: dict[str, Any] | None = None) -> None:
         if self.store:
@@ -218,6 +228,8 @@ class AlertRuntime:
             uncertain
             and (self.config.unavailable_policy == "suspend" or self._awaiting_source)
         ):
+            if not self.source_suspended:
+                self.outputs.stop()
             self.source_suspended = True
             # A gap in observed data breaks a sustained transition, except while
             # waiting for the first usable state of a restored incident.
@@ -271,6 +283,8 @@ class AlertRuntime:
 
     @callback
     def _transition(self, active: bool) -> None:
+        previous_variables = self._output_variables()
+        self.outputs.stop()
         self._generation += 1
         self.pending_active = self.pending_due = None
         self.snoozed_until = None
@@ -281,12 +295,25 @@ class AlertRuntime:
         self.incident_id = uuid4().hex if active else ""
         self.action_token = uuid4().hex if active else ""
         if active:
+            self.outputs.seen.clear()
             self.next_index = 0
             if not self.config.skip_first:
                 self._queue_reminder()
             self._schedule()
         else:
             self.next_notification = None
+            if send_done:
+                generation = self._generation
+                self.outputs.dispatch(
+                    self.config.outputs,
+                    previous_variables,
+                    lambda: (
+                        not self._stopped
+                        and not self.firing
+                        and generation == self._generation
+                    ),
+                    recovery=True,
+                )
             if send_done and self.config.done_message is not None:
                 self._task(self._deliver(self.config, self._generation, done=True))
 
@@ -363,7 +390,28 @@ class AlertRuntime:
         ):
             return
         self._reminder_pending = self._generation
+        generation = self._generation
+        self.outputs.dispatch(
+            self.config.outputs,
+            self._output_variables(),
+            lambda: (
+                not self._stopped
+                and self.firing
+                and not self.acknowledged
+                and not self.snoozed_until
+                and not self.source_suspended
+                and generation == self._generation
+            ),
+        )
         self._task(self._deliver(self.config, self._generation))
+
+    def _output_variables(self) -> dict[str, Any]:
+        return {
+            "alert_name": self.config.name,
+            "entity_id": self.config.entity_id,
+            "incident_id": self.incident_id,
+            "message": self.config.message or self.config.name,
+        }
 
     async def _deliver(
         self, config: AlertConfig, generation: int, *, done: bool = False
@@ -409,6 +457,8 @@ class AlertRuntime:
             raise ServiceValidationError("This alert cannot be acknowledged")
         self._context = context
         self.acknowledged = acknowledged
+        if acknowledged:
+            self.outputs.stop()
         self.snoozed_until = None
         self._arm()
         self._publish()
@@ -431,6 +481,7 @@ class AlertRuntime:
             )
         self._context = context
         self.snoozed_until = dt_util.utcnow() + timedelta(minutes=minutes)
+        self.outputs.stop()
         self._arm()
         self._publish()
 
@@ -494,6 +545,26 @@ class AlertRuntime:
                 "Test notification failed; inspect the status entity's errors"
             )
 
+    async def async_test_output(self, output_id: str | None = None) -> None:
+        """Start only the selected bounded effect; never create an incident."""
+        key = output_id or self.test_output_id
+        if key is None and self.config.outputs:
+            key = self.config.outputs[0]["id"]
+        if self._stopped or not any(item["id"] == key for item in self.config.outputs):
+            raise ServiceValidationError("Select a configured output to test")
+        if key in self.outputs.active:
+            raise ServiceValidationError("This output is already running")
+        self.outputs.dispatch(
+            self.config.outputs,
+            self._output_variables(),
+            lambda: not self._stopped,
+            test_id=key,
+        )
+
+    async def async_stop_outputs(self) -> None:
+        """Stop effects and test runs without acknowledging the incident."""
+        await self.outputs.async_stop()
+
     async def async_stop(self) -> None:
         """Unload quietly; cancel timers, listeners, and pending deliveries."""
         if self._stopped:
@@ -511,6 +582,7 @@ class AlertRuntime:
             task.cancel()
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
+        await self.outputs.async_stop()
         await self.async_save(snapshot)
 
     async def async_update_config(self, config: AlertConfig) -> None:

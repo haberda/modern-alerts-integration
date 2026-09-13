@@ -15,6 +15,7 @@ from homeassistant.helpers.template import Template
 from homeassistant.util import dt as dt_util
 
 from .const import MIN_REPEAT
+from .output_config import InvalidOutput, validate_outputs
 
 
 class InvalidConfig(ValueError):
@@ -55,6 +56,7 @@ class AlertConfig:
     numeric_recover_above: float | None = None
     numeric_recover_below: float | None = None
     numeric_unit: str | None = None
+    outputs: tuple[dict[str, Any], ...] = ()
 
     @classmethod
     def from_dict(cls, values: Mapping[str, Any], hass: HomeAssistant) -> AlertConfig:
@@ -189,12 +191,17 @@ class AlertConfig:
             raise InvalidConfig("numeric_recover_above", "incompatible_thresholds")
         if recover_below is not None and (above is None or recover_below > above):
             raise InvalidConfig("numeric_recover_below", "incompatible_thresholds")
+        try:
+            outputs = validate_outputs(values.get("outputs", []), hass)
+        except InvalidOutput as err:
+            raise InvalidConfig("outputs", err.code) from err
         return cls(
             name=values["name"].strip(),
             entity_id=entity_id,
             state=values.get("state", "on"),
             repeat=repeat,
             data=deepcopy(data),
+            outputs=outputs,
             **flags,
             **templates,
             **lists,
@@ -228,4 +235,5 @@ class AlertConfig:
             "numeric_recover_above": self.numeric_recover_above,
             "numeric_recover_below": self.numeric_recover_below,
             "numeric_unit": self.numeric_unit,
+            "outputs": deepcopy(list(self.outputs)),
         }

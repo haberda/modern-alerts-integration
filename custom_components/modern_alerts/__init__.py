@@ -15,7 +15,7 @@ from .const import DOMAIN
 from .models import AlertConfig, InvalidConfig
 from .runtime import AlertRuntime
 
-PLATFORMS = [Platform.SENSOR, Platform.BINARY_SENSOR, Platform.BUTTON]
+PLATFORMS = [Platform.SENSOR, Platform.BINARY_SENSOR, Platform.BUTTON, Platform.SELECT]
 type ModernAlertsEntry = ConfigEntry[AlertRuntime]
 
 
@@ -30,6 +30,8 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
         "test_notification": "async_test_notification",
         "snooze": "async_snooze",
         "cancel_snooze": "async_cancel_snooze",
+        "test_output": "async_test_output",
+        "stop_outputs": "async_stop_outputs",
     }.items():
         async_register_platform_entity_service(
             hass,
@@ -42,6 +44,8 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
                 )
             }
             if service == "snooze"
+            else {vol.Optional("output_id"): str}
+            if service == "test_output"
             else {},
             func=method,
         )
