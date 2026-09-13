@@ -3,6 +3,7 @@
 from collections.abc import Mapping
 from copy import deepcopy
 from dataclasses import dataclass, field
+from datetime import timedelta
 from math import isfinite
 from typing import Any
 
@@ -11,6 +12,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import TemplateError
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.template import Template
+from homeassistant.util import dt as dt_util
 
 from .const import MIN_REPEAT
 
@@ -63,15 +65,17 @@ class AlertConfig:
             repeat = tuple(float(n) for n in raw)
             if any(not isfinite(n) or n < MIN_REPEAT for n in repeat):
                 raise ValueError
-            # Scheduling must also fit datetime's representable range.
-            if any(n > 525600 for n in repeat):
-                raise ValueError
+            # Do not impose an arbitrary maximum, but prevent timer overflow.
+            for minutes in repeat:
+                dt_util.utcnow() + timedelta(minutes=minutes)
         except (ValueError, TypeError, OverflowError) as err:
             raise InvalidConfig("repeat", "invalid_repeat") from err
 
         templates = {}
         for key in ("message", "title", "done_message"):
-            value = values.get(key) or None
+            value = values.get(key)
+            if value == "":
+                value = None
             if value is not None:
                 try:
                     if not isinstance(value, str):

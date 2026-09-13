@@ -2,6 +2,7 @@
 
 import asyncio
 from datetime import timedelta
+from unittest.mock import patch
 
 import pytest
 from homeassistant.exceptions import ServiceValidationError
@@ -193,3 +194,105 @@ async def test_test_notification_does_not_arm_done(hass, make_runtime, notificat
     await set_state(hass, "off")
     assert len(notifications) == 1
     assert runtime.last_attempt is None
+
+
+async def test_queued_old_incident_cannot_suppress_new_incident(
+    hass, make_runtime, notifications
+):
+    runtime = make_runtime()
+    # Hold delivery so these transitions happen before a provider is called,
+    # even when Home Assistant uses eagerly started asyncio tasks.
+    await runtime._delivery_lock.acquire()
+    runtime._evaluate("on")
+    runtime._evaluate("off")
+    runtime._evaluate("on")
+    runtime._delivery_lock.release()
+    await hass.async_block_till_done()
+    assert [call.data["message"] for call in notifications] == ["Garage"]
+    assert runtime.state == "on"
+
+
+async def test_stale_timer_after_resolution_or_edit_is_ignored(
+    hass, make_runtime, notifications
+):
+    callbacks = []
+
+    def timer(hass, action, when):
+        callbacks.append(action)
+        return lambda: None
+
+    with patch(
+        "custom_components.modern_alerts.runtime.async_track_point_in_utc_time", timer
+    ):
+        runtime = make_runtime()
+        await set_state(hass, "on")
+        old_callback = callbacks[0]
+        await set_state(hass, "off")
+        await set_state(hass, "on")
+        old_callback(dt_util.utcnow())
+        await hass.async_block_till_done()
+        assert len(notifications) == 3
+        old_callback = callbacks[-1]
+        await runtime.async_update_config(
+            AlertConfig.from_dict({**runtime.config.as_dict(), "repeat": [1]}, hass)
+        )
+        old_callback(dt_util.utcnow())
+        await hass.async_block_till_done()
+        assert len(notifications) == 3
+
+
+async def test_template_failure_retries_at_next_interval(
+    hass, make_runtime, notifications, freezer
+):
+    runtime = make_runtime(
+        message="{{ 10 / (states('sensor.divisor') | float) }}", repeat=[1]
+    )
+    hass.states.async_set("sensor.divisor", "0")
+    await set_state(hass, "on")
+    assert runtime.errors == {"template": "render_failed"}
+    assert runtime.next_notification is not None
+    hass.states.async_set("sensor.divisor", "2")
+    await advance(hass, freezer, 1)
+    assert runtime.errors == {}
+    assert notifications[-1].data["message"] == "5.0"
+
+
+async def test_unload_cancels_slow_notification(hass, make_runtime):
+    started = asyncio.Event()
+    cancelled = asyncio.Event()
+
+    async def slow(call):
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            cancelled.set()
+
+    hass.services.async_register("notify", "slow", slow)
+    runtime = make_runtime(notifiers=["slow"])
+    hass.states.async_set("binary_sensor.garage", "on")
+    await started.wait()
+    await runtime.async_stop()
+    assert cancelled.is_set()
+    assert not runtime._tasks
+
+
+async def test_disabling_acknowledgement_on_edit_resumes(hass, make_runtime):
+    runtime = make_runtime()
+    await set_state(hass, "on")
+    runtime.acknowledge(True)
+    await runtime.async_update_config(
+        AlertConfig.from_dict(
+            {**runtime.config.as_dict(), "can_acknowledge": False}, hass
+        )
+    )
+    assert runtime.state == "on"
+
+
+async def test_test_notification_failure_is_visible(hass, make_runtime):
+    runtime = make_runtime(notifiers=["missing"])
+    with pytest.raises(ServiceValidationError):
+        await runtime.async_test_notification()
+    assert runtime.errors == {"notify.missing": "ServiceNotFound"}
+    assert runtime.state == "idle"
+    assert not runtime.attempted

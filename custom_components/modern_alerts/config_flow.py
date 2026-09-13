@@ -73,7 +73,6 @@ class AlertFlowSteps:
                         "selector": selector.NumberSelector(
                             {
                                 "min": MIN_REPEAT,
-                                "max": 525600,
                                 "step": "any",
                                 "mode": "box",
                             }

@@ -1,7 +1,11 @@
 """Render at dispatch time and isolate notifier failures."""
 
+import asyncio
+
 import pytest
+from homeassistant.components import notify
 from homeassistant.core import Context
+from homeassistant.setup import async_setup_component
 from pytest_homeassistant_custom_component.common import async_mock_service
 
 from custom_components.modern_alerts.models import AlertConfig
@@ -76,3 +80,59 @@ async def test_empty_destinations(hass):
         await async_notify(hass, AlertConfig(name="State", entity_id="sensor.test"))
         == {}
     )
+
+
+async def test_provider_timeout_does_not_block_other_destinations(
+    hass, notifications, monkeypatch
+):
+    async def slow(call):
+        await asyncio.Event().wait()
+
+    hass.services.async_register("notify", "slow", slow)
+    monkeypatch.setattr(
+        "custom_components.modern_alerts.notifications.NOTIFY_TIMEOUT", 0.01
+    )
+    config = AlertConfig(
+        name="Name", entity_id="sensor.test", notifiers=("slow", "phone")
+    )
+    assert await async_notify(hass, config) == {"notify.slow": "TimeoutError"}
+    assert len(notifications) == 1
+
+
+async def test_real_notify_entity_schema(hass):
+    assert await async_setup_component(hass, "notify", {})
+    calls = []
+
+    class Destination(notify.NotifyEntity):
+        _attr_name = "Real destination"
+        _attr_unique_id = "real_destination"
+        _attr_supported_features = notify.NotifyEntityFeature.TITLE
+
+        async def async_send_message(self, message, title=None):
+            calls.append((message, title))
+
+    entity = Destination()
+    await hass.data[notify.DATA_COMPONENT].async_add_entities([entity])
+    config = AlertConfig(
+        name="Name",
+        entity_id="sensor.test",
+        title="Title",
+        notify_entities=(entity.entity_id,),
+    )
+    assert await async_notify(hass, config) == {}
+    assert calls == [("Name", "Title")]
+
+
+async def test_generation_check_between_destinations(hass, notifications):
+    valid = True
+
+    async def first(call):
+        nonlocal valid
+        valid = False
+
+    hass.services.async_register("notify", "first", first)
+    config = AlertConfig(
+        name="Name", entity_id="sensor.test", notifiers=("first", "phone")
+    )
+    assert await async_notify(hass, config, valid=lambda: valid) == {}
+    assert notifications == []

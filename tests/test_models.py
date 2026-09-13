@@ -5,7 +5,9 @@ import pytest
 from custom_components.modern_alerts.models import AlertConfig, InvalidConfig
 
 
-@pytest.mark.parametrize("repeat", [[], 0, -1, True, [False], "nan", "inf", [None], {}])
+@pytest.mark.parametrize(
+    "repeat", [[], 0, -1, True, [False], "nan", "inf", [None], {}, 1e100]
+)
 def test_invalid_intervals(hass, repeat):
     with pytest.raises(InvalidConfig, match="repeat"):
         AlertConfig.from_dict(
@@ -25,6 +27,9 @@ def test_invalid_intervals(hass, repeat):
         ("notifiers", ["send_message"]),
         ("notifiers", ["bad space"]),
         ("skip_first", "false"),
+        ("message", 0),
+        ("notifiers", "phone"),
+        ("notify_entities", [42]),
     ],
 )
 def test_invalid_fields(hass, field, value):
@@ -60,3 +65,10 @@ def test_notify_entity_rejects_extra_data(hass):
             },
             hass,
         )
+
+
+def test_long_but_representable_interval(hass):
+    config = AlertConfig.from_dict(
+        {"name": "Name", "entity_id": "sensor.test", "repeat": 600000}, hass
+    )
+    assert config.repeat == (600000,)

@@ -142,3 +142,27 @@ async def test_invalid_saved_config_fails_clearly(hass):
     entry.add_to_hass(hass)
     assert not await hass.config_entries.async_setup(entry.entry_id)
     assert entry.state is ConfigEntryState.SETUP_ERROR
+
+
+@pytest.mark.parametrize("evaluate", [False, True])
+async def test_reload_has_documented_startup_policy(hass, notifications, evaluate):
+    entry = await setup_alert(hass, evaluate_on_start=evaluate)
+    status = entity_id(hass, entry, "sensor", "status")
+    hass.states.async_set("binary_sensor.garage", "on")
+    await hass.async_block_till_done()
+    entry.runtime_data.acknowledge(True)
+    assert await hass.config_entries.async_reload(entry.entry_id)
+    await hass.async_block_till_done()
+    assert entity_id(hass, entry, "sensor", "status") == status
+    assert entry.runtime_data.state == ("on" if evaluate else "idle")
+    assert len(notifications) == (2 if evaluate else 1)
+
+
+async def test_test_button(hass, notifications):
+    entry = await setup_alert(hass)
+    button = entity_id(hass, entry, "button", "test_notification")
+    await hass.services.async_call(
+        "button", "press", {"entity_id": button}, blocking=True
+    )
+    assert len(notifications) == 1
+    assert not entry.runtime_data.attempted

@@ -188,7 +188,11 @@ class AlertRuntime:
 
     async def async_test_notification(self, context: Context | None = None) -> None:
         """Explicit test: no incident bookkeeping or resolution eligibility."""
-        errors = await async_notify(self.hass, self.config, context=context)
+        if not (self.config.notifiers or self.config.notify_entities):
+            raise ServiceValidationError("This alert has no notification destinations")
+        errors = await async_notify(
+            self.hass, self.config, context=context, valid=lambda: not self._stopped
+        )
         self.errors = errors
         self._publish()
         if errors:
