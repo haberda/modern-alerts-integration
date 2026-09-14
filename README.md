@@ -2,7 +2,7 @@
 
 A custom Home Assistant integration that reproduces the built-in Alert lifecycle with setup and editing through **Settings → Devices & services**. Each alert has a status sensor, a problem binary sensor, and buttons to acknowledge, snooze, resume, and test notifications.
 
-**Version 0.3.0 targets Home Assistant 2026.9.2 (Python 3.14).** The test suite runs against that exact release. Earlier versions are not supported; newer releases require compatibility testing. This integration uses its own `modern_alerts` actions and standard entities, so existing `alert.*` references need migration.
+**Version 0.4.0 targets Home Assistant 2026.9.2 (Python 3.14).** The test suite runs against that exact release. Earlier versions are not supported; newer releases require compatibility testing. This integration uses its own `modern_alerts` actions and standard entities, so existing `alert.*` references need migration.
 
 ## Install
 
@@ -22,13 +22,13 @@ This is a custom integration, not an automation blueprint. After installation, c
 
 ## Create an alert
 
-The setup wizard walks through five main steps, with an optional output editor:
+The setup wizard walks through five main steps, with optional output and delivery editors:
 
 1. **Condition:** name, source entity, and the exact problem state. Use `on` for a typical door binary sensor. Match the underlying state string, not a translated label such as “Open.” For numeric alerts, enter one problem threshold and an optional recovery threshold; the exact state field is then ignored. An optional expected unit protects against changes in source units. Use a Template binary sensor helper for compound conditions.
 2. **Timing:** add one interval for fixed repetition or several intervals in order. Values are minutes and may be fractional (minimum `0.016`). The final interval repeats indefinitely. Choose whether to delay the first notification and whether acknowledgement is allowed. Set sustained activation/recovery delays, startup/restoration policy, unavailable-source policy, snooze defaults, and Companion phone controls here.
 3. **Destinations:** choose legacy notify actions, notify entities, or leave both lists empty for a state-only alert. Missing legacy action names can be entered manually. Enable **Add or edit light, siren, speaker, and custom outputs** to configure device effects before continuing to Content.
 4. **Content:** optional message, title, resolution message, and provider data. Text fields support Home Assistant templates. An empty message uses the alert name; an empty resolution message disables completion notifications. The alert name is literal text. Extra data is an optional YAML mapping entered within the UI and is forwarded unchanged.
-5. **Review:** inspect the source's current state, schedule, and destinations before saving.
+5. **Review:** inspect the source's current state, schedule, destinations, profiles, and stages before saving. Enabling **Configure escalation, delivery rules, and history** in Timing adds a delivery editor after Content.
 
 Saving never sends a test notification. The optional **Evaluate the existing condition on startup** setting can send a real alert immediately if the source already matches when the integration loads. It defaults off for compatibility with built-in Alert.
 
@@ -51,9 +51,9 @@ Open the alert's device under Modern Alerts to access its entities. You can also
 | Stop outputs button | Cancels active effects and tests with cleanup; does not acknowledge the incident. |
 | Test notification button | Sends the current alert message without creating an incident or enabling a resolution notification. Available when destinations are configured. |
 
-Acknowledge does not disable monitoring. When the source clears, the incident ends, any eligible resolution notification is sent, and the next incident starts unacknowledged. Timers continue advancing silently while acknowledged.
+Acknowledge does not disable monitoring. When the source clears, the incident ends, any eligible resolution notification is sent, and the next incident starts unacknowledged. Timers continue advancing silently while acknowledged. **Send resolution notification after acknowledgement** defaults on. Turn it off to suppress both resolution messages and recovery outputs when the incident is acknowledged at resolution. Cleanup still runs, monitoring rearms normally, and snooze alone does not suppress resolution.
 
-Use the configuration entry's **Configure/options** control to edit every setting. Name, timing, destination, and message edits retain acknowledgement when the watched entity and condition (including numeric thresholds and expected unit) stay the same. Saving changed options cancels pending delivery work. Message, destination, and name edits preserve the existing deadline. Changing repeat intervals restarts the interval sequence from save time. Changing debounce delays restarts any pending transition. None sends an extra immediate reminder for an unchanged active condition. Changing the condition starts fresh without sending a resolution message for the replaced condition. Entity IDs remain stable when the alert is renamed.
+Use the configuration entry's **Configure/options** control to edit every setting. Name, timing, destination, and message edits retain acknowledgement when the watched entity and condition (including numeric thresholds and expected unit) stay the same. Saving changed options cancels pending delivery work. Message, destination, and name edits preserve the existing deadline. Changing repeat intervals restarts the interval sequence from save time. Changing debounce delays restarts any pending transition. Ordinary edits send no extra immediate reminder for an unchanged active condition. Editing escalation stages re-evaluates their thresholds against the current incident age and can send a newly due stage immediately. Changing the condition starts fresh without sending a resolution message for the replaced condition. Entity IDs remain stable when the alert is renamed.
 
 Disabling the configuration entry stops the alert entirely. Deleting its entry removes its entities and listeners. Neither operation sends a resolution notification. These operations are different from acknowledgement.
 
@@ -116,6 +116,7 @@ All actions target this integration's **status sensor**, not the watched source 
 | — | `modern_alerts.cancel_snooze` | Keeps acknowledgement |
 | — | `modern_alerts.test_output` | Optional `output_id`; otherwise the device selector |
 | — | `modern_alerts.stop_outputs` | Stop active effects and tests with cleanup |
+| — | `modern_alerts.clear_history` | Clear recent metadata without changing the incident |
 
 Example acknowledgement action, also available through the automation action editor:
 
@@ -158,7 +159,27 @@ The status sensor exposes `snoozed_until`, `source_suspended`, `pending_transiti
 
 Restoration uses private, atomic Home Assistant storage with coalesced writes and an explicit save on unload/shutdown. Disabling restoration clears saved incident data; deleting the entry removes it. Old incomplete snapshots from the initial experimental persistence implementation are ignored; corrupt snapshots start fresh and expose `restore: invalid_snapshot`. There is no exactly-once delivery guarantee across a crash: a crash near dispatch or before the coalesced write can lose recent state or repeat a notification. A currently matching source is treated as continuation of the saved incident because transitions during downtime cannot be known.
 
-Escalation, quiet hours, grouping/rate limits, migration import, and native compound-condition builders remain future work.
+Migration import, native compound-condition builders, richer schedules, and a dedicated overview dashboard remain future work.
+
+## Escalation, delivery rules, profiles, and history
+
+Enable **Configure escalation, delivery rules, and history** in Timing to open the delivery editor after Content. Existing alerts retain their behavior until you configure these options.
+
+**Escalation stages.** Add up to ten stages with distinct elapsed-minute thresholds and names. For example: notify the phone initially; at five minutes enable a flashing-light output; at fifteen minutes enable a siren and add another recipient. Assign outputs to stages using the output picker; an output assigned to any stage is withheld until its first selected stage. Unassigned outputs are available from the start. Recipients and output availability accumulate. An optional interval replaces the reminder cadence from that stage onward; otherwise the alert's interval sequence is used. A stage becoming due is a notification opportunity of its own, even if the original first-repeat deadline is later.
+
+Acknowledgement stops stage advancement. Resume re-evaluates elapsed incident time; snooze suppresses delivery without resetting that age. Restart restoration saves the incident start and stage position. After downtime, the integration advances to the latest due stage, attempts at most one catch-up notification, and resumes the schedule. Changing stage definitions during an incident re-evaluates them from the original start. Deleted stage outputs are reported through `policy_errors`.
+
+**Quiet hours.** Set both start and end times for phone/notify destinations in the delivery editor, or independently in each device output's form. These are daily periods in Home Assistant's configured timezone, including overnight windows and DST transitions. Held alert messages and outputs resume within one minute after the window ends, provided the incident remains eligible; missed reminders are not replayed as a burst. Acknowledgement prevents catch-up and snooze delays it. The delayed-first setting is still respected until a notification opportunity actually occurs. Existing device effects are stopped when their policy becomes quiet, checked at most once per minute. Cleanup always runs; recovery messages/actions that fall in a blocked period are skipped rather than held for later.
+
+**Presence routing.** Select people, trackers, occupancy binary sensors, or input booleans. Choose **At least one person or room is present** (any `home`/`on`), or **Everyone / all rooms are away** (all known and neither `home` nor `on`). Unknown or missing states do not establish absence. Presence events re-evaluate held delivery immediately. This supports, for example, phone delivery when everyone is away and announcements only in occupied rooms. Each speaker output selects its own occupancy entities. Test buttons explicitly bypass delivery rules so you can check a device regardless of occupancy or quiet hours.
+
+**Reusable profiles.** Add another Modern Alerts integration entry, choose **Reusable output profile**, and give it a name. A source entity is unnecessary. Configure shared destinations and outputs, then save. Select one or more profiles in an alert's Destinations step. Profiles do not monitor conditions or create status/control entities; edit them through their integration entry's options. A profile is shared, not copied: edits cancel old effects and update referencing alerts for subsequent delivery opportunities. Disabling/deleting a profile stops its effects and reports it as unavailable while other destinations continue. Profiles cannot reference other profiles. Output IDs are scoped per profile, so duplicate output names do not collide. A profile edit introducing notify entities into an alert with incompatible extra data blocks those notify-entity targets and exposes an error; compatible legacy targets still run.
+
+**Grouping and rate limits.** Give related alerts the same notification group and a 1–300 second collection window. Alerts combine only when their destination sets, title configuration, and provider data also match. A later reminder replaces its alert's pending content rather than extending the original grouping deadline. Acknowledged, resolved, removed, or otherwise ineligible incidents are excluded at dispatch. A single-member notification retains its generated phone controls; a multi-alert summary omits them because one button cannot unambiguously acknowledge several incidents. Use the individual alert devices to acknowledge those incidents, or leave grouping off when individual phone controls are essential.
+
+Set a minimum notification interval to coalesce frequent repeats. With no group, this applies to the alert's destination set; with a group, matching members share the limit. These policies apply to alert notifications, not physical outputs or resolution messages. Device outputs retain their duration, coalescing, and shared-device ownership behavior. Group buffers and rate-limit timestamps are in memory and reset after Home Assistant restarts. With incident restoration enabled, a held notification is remembered and can be queued again after recovery. No exactly-once delivery guarantee is made across crashes or provider failures.
+
+**Incident history.** The status sensor exposes the latest lifecycle, escalation, notification attempt/result, and output start/stop/error events, along with `incident_started`, `escalation_stage`, and `policy_errors`. The configurable limit defaults to 50 entries; choose 0 to disable or up to 100. Records contain timestamps, incident/output identifiers, and error categories—not rendered messages or notification payloads. Enable incident restoration to preserve this history across reloads. Download diagnostics from the integration entry for the same bounded metadata, or use **Clear incident history** targeting the status sensor to clear the integration's current history without changing the incident. Clearing it does not remove historical snapshots already retained by Home Assistant Recorder.
 
 ## Development and validation
 
