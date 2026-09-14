@@ -48,7 +48,7 @@ class AlertButton(ModernAlertEntity, ButtonEntity):
     @property
     def available(self) -> bool:
         if self.key == "test_output":
-            return bool(self.runtime.config.outputs)
+            return bool(self.runtime.all_outputs)
         if self.key == "stop_outputs":
             return bool(self.runtime.outputs.active)
         if self.key == "snooze":
@@ -61,7 +61,8 @@ class AlertButton(ModernAlertEntity, ButtonEntity):
             return self.runtime.snoozed_until is not None
         if self.key == "test_notification":
             return bool(
-                self.runtime.config.notifiers or self.runtime.config.notify_entities
+                self.runtime.effective_config.notifiers
+                or self.runtime.effective_config.notify_entities
             )
         if self.key == "acknowledge":
             return (

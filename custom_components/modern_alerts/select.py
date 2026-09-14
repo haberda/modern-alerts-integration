@@ -24,7 +24,7 @@ class OutputSelection(ModernAlertEntity, SelectEntity):
     def options(self):
         return [
             f"{index}. {item['name']}"
-            for index, item in enumerate(self.runtime.config.outputs, 1)
+            for index, item in enumerate(self.runtime.all_outputs, 1)
         ]
 
     @property
@@ -33,7 +33,7 @@ class OutputSelection(ModernAlertEntity, SelectEntity):
 
     @property
     def current_option(self):
-        for item, label in zip(self.runtime.config.outputs, self.options, strict=True):
+        for item, label in zip(self.runtime.all_outputs, self.options, strict=True):
             if item["id"] == self.runtime.test_output_id:
                 return label
         return self.options[0] if self.options else None
@@ -41,7 +41,7 @@ class OutputSelection(ModernAlertEntity, SelectEntity):
     async def async_select_option(self, option):
         if option not in self.options:
             raise ServiceValidationError("Select a configured output")
-        self.runtime.test_output_id = self.runtime.config.outputs[
+        self.runtime.test_output_id = self.runtime.all_outputs[
             self.options.index(option)
         ]["id"]
         self.runtime._publish()

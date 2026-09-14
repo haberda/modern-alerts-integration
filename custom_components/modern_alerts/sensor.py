@@ -47,10 +47,16 @@ class AlertStatus(ModernAlertEntity, SensorEntity):
             "source_suspended": runtime.source_suspended,
             "pending_transition": runtime.pending_active,
             "pending_deadline": runtime.pending_due,
+            "incident_started": runtime.started_at,
+            "escalation_stage": runtime.config.stages[runtime.stage_index - 1]["name"]
+            if runtime.stage_index
+            else "Initial",
+            "history": runtime.history,
+            "policy_errors": runtime.policy_errors,
             "active_outputs": runtime.outputs.active,
             "output_errors": runtime.outputs.errors,
             "configured_outputs": {
-                item["id"]: item["name"] for item in runtime.config.outputs
+                item["id"]: item["name"] for item in runtime.all_outputs
             },
         }
 
@@ -77,3 +83,7 @@ class AlertStatus(ModernAlertEntity, SensorEntity):
 
     async def async_stop_outputs(self) -> None:
         await self.runtime.async_stop_outputs()
+
+    async def async_clear_history(self) -> None:
+        self.runtime.history.clear()
+        self.runtime._publish()

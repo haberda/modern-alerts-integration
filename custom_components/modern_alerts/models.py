@@ -16,6 +16,7 @@ from homeassistant.util import dt as dt_util
 
 from .const import MIN_REPEAT
 from .output_config import InvalidOutput, validate_outputs
+from .policies import InvalidPolicy, validate_policy, validate_stages
 
 
 class InvalidConfig(ValueError):
@@ -58,6 +59,11 @@ class AlertConfig:
     numeric_recover_below: float | None = None
     numeric_unit: str | None = None
     outputs: tuple[dict[str, Any], ...] = ()
+    kind: str = "alert"
+    profile_ids: tuple[str, ...] = ()
+    stages: tuple[dict[str, Any], ...] = ()
+    delivery: dict[str, Any] = field(default_factory=dict)
+    history_limit: int = 50
 
     @classmethod
     def from_dict(cls, values: Mapping[str, Any], hass: HomeAssistant) -> AlertConfig:
@@ -197,6 +203,25 @@ class AlertConfig:
             outputs = validate_outputs(values.get("outputs", []), hass)
         except InvalidOutput as err:
             raise InvalidConfig("outputs", err.code) from err
+        try:
+            delivery = validate_policy(values.get("delivery", {}))
+            stages = validate_stages(values.get("stages", []))
+        except InvalidPolicy as err:
+            raise InvalidConfig(err.field, "invalid_policy") from err
+        kind = values.get("kind", "alert")
+        profiles = values.get("profile_ids", [])
+        history_limit = values.get("history_limit", 50)
+        if (
+            kind not in ("alert", "profile")
+            or not isinstance(profiles, list | tuple)
+            or any(not isinstance(key, str) for key in profiles)
+            or (kind == "profile" and profiles)
+        ):
+            raise InvalidConfig("profile_ids", "invalid_policy")
+        if type(history_limit) is not int or not 0 <= history_limit <= 100:
+            raise InvalidConfig("history_limit", "invalid_policy")
+        if data and any(stage["notify_entities"] for stage in stages):
+            raise InvalidConfig("data", "entity_data_unsupported")
         return cls(
             name=values["name"].strip(),
             entity_id=entity_id,
@@ -204,6 +229,11 @@ class AlertConfig:
             repeat=repeat,
             data=deepcopy(data),
             outputs=outputs,
+            kind=kind,
+            profile_ids=tuple(dict.fromkeys(profiles)),
+            stages=stages,
+            delivery=delivery,
+            history_limit=history_limit,
             **flags,
             **templates,
             **lists,
@@ -239,4 +269,9 @@ class AlertConfig:
             "numeric_recover_below": self.numeric_recover_below,
             "numeric_unit": self.numeric_unit,
             "outputs": deepcopy(list(self.outputs)),
+            "kind": self.kind,
+            "profile_ids": list(self.profile_ids),
+            "stages": deepcopy(list(self.stages)),
+            "delivery": deepcopy(self.delivery),
+            "history_limit": self.history_limit,
         }

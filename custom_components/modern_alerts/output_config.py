@@ -8,6 +8,8 @@ import voluptuous as vol
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.template import Template
 
+from .policies import InvalidPolicy, validate_policy
+
 OUTPUT_TYPES = ("light", "siren", "tts", "audio", "custom")
 
 
@@ -25,6 +27,10 @@ def validate_output(raw: dict[str, Any], hass) -> dict[str, Any]:
     if not isinstance(raw, dict) or raw.get("type") not in OUTPUT_TYPES:
         raise InvalidOutput("type")
     result = deepcopy(raw)
+    try:
+        result["delivery"] = validate_policy(raw.get("delivery", {}))
+    except InvalidPolicy as err:
+        raise InvalidOutput(err.field, "invalid_policy") from err
     kind = raw["type"]
     for key in ("id", "name"):
         if not isinstance(raw.get(key), str) or not raw[key].strip():

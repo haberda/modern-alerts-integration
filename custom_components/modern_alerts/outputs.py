@@ -132,9 +132,10 @@ class OutputManager:
     a busy device is reported and can be retried at the next reminder.
     """
 
-    def __init__(self, hass: HomeAssistant, publish: Callable[[], None]):
+    def __init__(self, hass: HomeAssistant, publish: Callable[[], None], event=None):
         self.hass = hass
         self.publish = publish
+        self.event = event or (lambda *args, **kwargs: None)
         self.errors: dict[str, str] = {}
         self.seen: set[str] = set()
         self._runs: dict[str, asyncio.Task] = {}
@@ -158,6 +159,16 @@ class OutputManager:
             if not task.done() and not task.cancelling():
                 task.cancel()
 
+    @callback
+    def stop_ids(self, ids) -> None:
+        for key in ids:
+            if (
+                (task := self._runs.get(key))
+                and not task.done()
+                and not task.cancelling()
+            ):
+                task.cancel()
+
     async def async_stop(self) -> None:
         self.stop()
         if self._tasks:
@@ -166,6 +177,7 @@ class OutputManager:
     @callback
     def dispatch(self, outputs, variables, valid, *, recovery=False, test_id=None):
         """Start independent effects without blocking phone dispatch or timers."""
+        launched = []
         for output in outputs:
             key = output["id"]
             if test_id is not None and key != test_id:
@@ -184,7 +196,7 @@ class OutputManager:
             if (old := self._runs.get(key)) and not old.done() and not old.cancelling():
                 continue
             if not valid():
-                return
+                break
             if test_id is None and not recovery:
                 self.seen.add(key)
             self.errors.pop(key, None)
@@ -197,10 +209,12 @@ class OutputManager:
                 eager_start=False,
             )
             self._runs[key] = task
+            launched.append(key)
             self._tasks.add(task)
             task.add_done_callback(self._tasks.discard)
             task.add_done_callback(lambda _: self.publish())
         self.publish()
+        return launched
 
     async def _run(self, output, variables, valid, *, recovery):
         key = output["id"]
@@ -208,6 +222,11 @@ class OutputManager:
             async with self._serial.setdefault(key, asyncio.Lock()):
                 if not valid():
                     return
+                self.event(
+                    "output_started",
+                    output_id=key,
+                    incident_id=variables.get("incident_id", ""),
+                )
                 variables = {
                     **variables,
                     "message": Template(variables["message"], self.hass).async_render(
@@ -225,9 +244,21 @@ class OutputManager:
                         )
                     )
         except asyncio.CancelledError:
+            self.event(
+                "output_stopped",
+                output_id=key,
+                incident_id=variables.get("incident_id", ""),
+            )
             raise
         except Exception as err:
             self.errors[key] = type(err).__name__
+            self.event("output_error", output_id=key, error=type(err).__name__)
+        else:
+            self.event(
+                "output_finished",
+                output_id=key,
+                incident_id=variables.get("incident_id", ""),
+            )
         finally:
             self.publish()
 
@@ -285,6 +316,12 @@ class OutputManager:
             raise
         except Exception as err:
             self.errors[f"{output['id']}:{entity}"] = type(err).__name__
+            self.event(
+                "output_error",
+                output_id=output["id"],
+                entity_id=entity,
+                error=type(err).__name__,
+            )
         finally:
             if session:
                 try:
