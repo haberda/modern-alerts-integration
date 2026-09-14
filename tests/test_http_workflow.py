@@ -333,3 +333,110 @@ async def test_profiles_and_delivery_policy_http_workflow(
             f"/api/config/config_entries/entry/{current.entry_id}"
         )
         assert response.status == 200
+
+
+async def test_compound_weekly_import_and_duplicate_http(
+    hass, hass_client, notifications
+):
+    """Use serialized native selectors and complete both draft creation paths."""
+    assert await async_setup_component(hass, "http", {})
+    config_entries.async_setup(hass)
+    client = await hass_client()
+
+    async def submit(result, values, options=False):
+        endpoint = "options/flow" if options else "flow"
+        response = await client.post(
+            f"/api/config/config_entries/{endpoint}/{result['flow_id']}", json=values
+        )
+        assert response.status == 200, await response.text()
+        result = await response.json()
+        assert not result.get("errors"), result
+        return result
+
+    response = await client.post(
+        "/api/config/config_entries/flow", json={"handler": DOMAIN}
+    )
+    result = await response.json()
+    result = await submit(result, {"setup_action": "import_yaml"})
+    result = await submit(
+        result,
+        {
+            "yaml": "door:\n  name: Door\n  entity_id: binary_sensor.door\n  state: on\n  repeat: [2, 10]\n  notifiers: [phone]\n  can_acknowledge: false"
+        },
+    )
+    result = await submit(result, {"source": "door"})
+    assert result["step_id"] == "user"
+    compound = [
+        {"entity_id": "binary_sensor.door", "operator": "state", "value": "on"},
+        {"entity_id": "sensor.temp", "operator": "above", "value": "25"},
+    ]
+    result = await submit(
+        result,
+        {"name": "Imported compound", "conditions": compound, "condition_mode": "all"},
+    )
+    result = await submit(
+        result,
+        {
+            "intervals": [{"minutes": 2}, {"minutes": 10}],
+            "configure_delivery": True,
+            "can_acknowledge": False,
+        },
+    )
+    result = await submit(result, {"notifiers": ["phone"]})
+    result = await submit(result, {"message": "Check the door"})
+    assert result["step_id"] == "delivery"
+    weekly = [{"days": ["mon", "tue"], "start": "09:00:00", "end": "17:00:00"}]
+    result = await submit(result, {"weekly_windows": weekly})
+    assert result["step_id"] == "review"
+    assert not hass.config_entries.async_entries(DOMAIN) and not notifications
+    result = await submit(result, {})
+    assert result["type"] == "create_entry"
+    await hass.async_block_till_done()
+    original = hass.config_entries.async_entries(DOMAIN)[0]
+    assert original.data["conditions"][1]["value"] == 25
+    assert original.data["delivery"]["weekly_windows"] == weekly
+    assert original.data["can_acknowledge"] is False
+
+    response = await client.post(
+        "/api/config/config_entries/flow", json={"handler": DOMAIN}
+    )
+    result = await submit(await response.json(), {"setup_action": "duplicate"})
+    result = await submit(result, {"source": original.entry_id})
+    assert result["step_id"] == "user"
+    result = await submit(
+        result, {"name": "Door copy", "entity_id": "binary_sensor.other", "state": "on"}
+    )
+    result = await submit(result, {"intervals": [{"minutes": 3}]})
+    result = await submit(result, {"notifiers": ["phone"]})
+    result = await submit(result, {"message": "Copy"})
+    result = await submit(result, {})
+    assert result["type"] == "create_entry"
+    await hass.async_block_till_done()
+    entries = hass.config_entries.async_entries(DOMAIN)
+    assert len(entries) == 2
+    copied = next(entry for entry in entries if entry.entry_id != original.entry_id)
+    assert copied.data["conditions"] == []
+    assert copied.data["repeat"] == [3]
+    assert original.data["repeat"] == [2, 10]
+    assert copied.data["delivery"]["weekly_windows"] == weekly
+
+    response = await client.post(
+        "/api/config/config_entries/options/flow", json={"handler": original.entry_id}
+    )
+    result = await submit(
+        await response.json(),
+        {"name": "Simplified", "entity_id": "binary_sensor.door", "state": "on"},
+        True,
+    )
+    result = await submit(
+        result, {"intervals": [{"minutes": 2}], "configure_delivery": True}, True
+    )
+    result = await submit(result, {}, True)
+    result = await submit(result, {}, True)
+    result = await submit(result, {}, True)
+    result = await submit(result, {}, True)
+    assert result["type"] == "create_entry"
+    await hass.async_block_till_done()
+    assert original.options["conditions"] == []
+    assert original.options["delivery"]["weekly_windows"] == []
+    assert not notifications

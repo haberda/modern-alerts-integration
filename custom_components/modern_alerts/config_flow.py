@@ -1,5 +1,6 @@
 """Native creation and options workflows, one config entry per alert."""
 
+from copy import deepcopy
 from typing import Any
 
 import voluptuous as vol
@@ -8,6 +9,7 @@ from homeassistant.core import callback
 from homeassistant.helpers import selector
 
 from .const import DOMAIN, MIN_REPEAT
+from .importer import parse_alerts
 from .models import AlertConfig, InvalidConfig
 from .output_flow import OutputFlowSteps
 from .policy_flow import DeliveryFlowSteps
@@ -31,14 +33,26 @@ class AlertFlowSteps(OutputFlowSteps, DeliveryFlowSteps):
             "numeric_recover_below",
             "numeric_unit",
         )
+        if step_id == "user" and user_input is not None:
+            action = user_input.get("setup_action", "new")
+            if action == "duplicate":
+                return await self.async_step_duplicate()
+            if action == "import_yaml":
+                return await self.async_step_import_yaml()
         if user_input is not None:
             # Clearing optional numeric fields switches back to exact state matching.
-            values = {key: None for key in numeric_fields} | user_input
+            values = (
+                {key: None for key in numeric_fields}
+                | {"conditions": [], "condition_mode": "all"}
+                | user_input
+            )
             values["kind"] = (
                 user_input.get("kind", "alert")
                 if step_id == "user"
                 else self._values.get("kind", "alert")
             )
+            if values.get("conditions") and not values.get("entity_id"):
+                values["entity_id"] = values["conditions"][0].get("entity_id")
             if values["kind"] == "profile":
                 values["entity_id"] = "sensor.modern_alerts_profile"
             try:
@@ -56,6 +70,17 @@ class AlertFlowSteps(OutputFlowSteps, DeliveryFlowSteps):
             vol.Required("state", default="on"): selector.TextSelector(),
         }
         if step_id == "user":
+            fields[vol.Optional("setup_action", default="new")] = (
+                selector.SelectSelector(
+                    {
+                        "options": ["new", "duplicate", "import_yaml"],
+                        "translation_key": "setup_action",
+                    }
+                )
+            )
+            # Selecting a draft source must not require a name or watched entity.
+            fields.pop(vol.Required("name"))
+            fields[vol.Optional("name")] = selector.TextSelector()
             fields[vol.Required("kind", default="alert")] = selector.SelectSelector(
                 {"options": ["alert", "profile"], "translation_key": "entry_kind"}
             )
@@ -64,6 +89,34 @@ class AlertFlowSteps(OutputFlowSteps, DeliveryFlowSteps):
                 {"step": "any", "mode": "box"}
             )
         fields[vol.Optional("numeric_unit")] = selector.TextSelector()
+        fields[vol.Optional("conditions")] = selector.ObjectSelector(
+            {
+                "multiple": True,
+                "label_field": "entity_id",
+                "fields": {
+                    "entity_id": {
+                        "label": "Entity",
+                        "required": True,
+                        "selector": selector.EntitySelector(),
+                    },
+                    "operator": {
+                        "label": "Comparison",
+                        "required": True,
+                        "selector": selector.SelectSelector(
+                            {"options": ["state", "not_state", "above", "below"]}
+                        ),
+                    },
+                    "value": {
+                        "label": "State or numeric threshold",
+                        "required": True,
+                        "selector": selector.TextSelector(),
+                    },
+                },
+            }
+        )
+        fields[vol.Required("condition_mode", default="all")] = selector.SelectSelector(
+            {"options": ["all", "any"], "translation_key": "condition_mode"}
+        )
         if step_id == "init" and self._values.get("kind") == "profile":
             fields = {vol.Required("name"): selector.TextSelector()}
         return self.async_show_form(
@@ -298,7 +351,9 @@ class AlertFlowSteps(OutputFlowSteps, DeliveryFlowSteps):
                 "name": config.name,
                 "entity": config.entity_id,
                 "state": (
-                    f"below {config.numeric_below:g}"
+                    f"{config.condition_mode} of {len(config.conditions)} compound rules"
+                    if config.conditions
+                    else f"below {config.numeric_below:g}"
                     if config.numeric_below is not None
                     else f"above {config.numeric_above:g}"
                     if config.numeric_above is not None
@@ -343,6 +398,79 @@ class ModernAlertsConfigFlow(AlertFlowSteps, config_entries.ConfigFlow, domain=D
         if not hasattr(self, "_values"):
             self._values = {}
         return await self._basics("user", user_input)
+
+    async def async_step_duplicate(self, user_input=None):
+        entries = {
+            entry.entry_id: entry
+            for entry in self.hass.config_entries.async_entries(DOMAIN)
+        }
+        errors = {}
+        if user_input is not None:
+            entry = entries.get(user_input.get("source"))
+            if entry is None:
+                errors["source"] = "invalid_source"
+            else:
+                self._values = deepcopy(dict(entry.options or entry.data))
+                self._values["name"] += " copy"
+                return await self._basics("user")
+        return self.async_show_form(
+            step_id="duplicate",
+            data_schema=vol.Schema(
+                {
+                    vol.Required("source"): selector.SelectSelector(
+                        {
+                            "options": [
+                                {"value": key, "label": entry.title}
+                                for key, entry in entries.items()
+                            ]
+                        }
+                    )
+                }
+            ),
+            errors=errors,
+        )
+
+    async def async_step_import_yaml(self, user_input=None):
+        errors = {}
+        if user_input is not None:
+            try:
+                self._imports = parse_alerts(user_input.get("yaml", ""), self.hass)
+            except ValueError, InvalidConfig:
+                errors["yaml"] = "invalid_import"
+            else:
+                return await self.async_step_import_select()
+        return self.async_show_form(
+            step_id="import_yaml",
+            data_schema=vol.Schema(
+                {vol.Required("yaml"): selector.TextSelector({"multiline": True})}
+            ),
+            errors=errors,
+        )
+
+    async def async_step_import_select(self, user_input=None):
+        errors = {}
+        if user_input is not None:
+            if user_input.get("source") not in self._imports:
+                errors["source"] = "invalid_source"
+            else:
+                self._values = deepcopy(self._imports[user_input["source"]])
+                return await self._basics("user")
+        return self.async_show_form(
+            step_id="import_select",
+            data_schema=vol.Schema(
+                {
+                    vol.Required("source"): selector.SelectSelector(
+                        {
+                            "options": [
+                                {"value": key, "label": f"{key}: {values['name']}"}
+                                for key, values in self._imports.items()
+                            ]
+                        }
+                    )
+                }
+            ),
+            errors=errors,
+        )
 
     @callback
     def _finish(self, config):

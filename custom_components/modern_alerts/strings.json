@@ -4,7 +4,7 @@
     "step": {
       "user": {
         "title": "Alert condition",
-        "description": "Watch an exact state, or set one numeric problem threshold. Numeric thresholds use the source entity's units; no unit conversion is performed. For compound conditions, select a Template binary sensor helper.",
+        "description": "Watch an exact state or numeric threshold, or add compound rules. Compound rules replace single-source matching and use ALL (AND) or ANY (OR). Numeric compound comparisons use raw source units and have no hysteresis. Profiles contain only shared delivery destinations and outputs.",
         "data": {
           "name": "Alert name",
           "entity_id": "Entity to watch",
@@ -14,7 +14,10 @@
           "numeric_recover_above": "Recover above (for a below threshold)",
           "numeric_recover_below": "Recover below (for an above threshold)",
           "numeric_unit": "Expected numeric unit (optional)",
-          "kind": "Create an alert or a reusable profile"
+          "kind": "Create an alert or a reusable profile",
+          "conditions": "Compound rules (optional)",
+          "condition_mode": "Combine compound rules",
+          "setup_action": "Start with a new alert, copy, or YAML import"
         },
         "data_description": {
           "state": "Underlying state string, such as on or open. Ignored when a numeric problem threshold is set.",
@@ -23,7 +26,9 @@
           "numeric_recover_above": "Optional. Keep the incident active until strictly above this value. Must be at least the problem-below threshold.",
           "numeric_recover_below": "Optional. Keep the incident active until strictly below this value. Must be at most the problem-above threshold.",
           "numeric_unit": "Exact unit attribute, for example %, °C, or °F. A missing or different unit suspends evaluation. Empty accepts the source's current units.",
-          "entity_id": "Required for alerts. Profiles only contain shared notification destinations and device outputs; they do not monitor a source."
+          "entity_id": "Primary source for existing templates. Optional with compound rules; defaults to their first entity. Profiles do not watch a source.",
+          "conditions": "Up to 20 rules. Empty uses the single watched entity. Unknown inputs follow the unavailable-source policy when known rules cannot determine the result.",
+          "setup_action": "To duplicate or import, select it and continue; leave the other fields empty."
         }
       },
       "timing": {
@@ -151,7 +156,8 @@
           "quiet_start": "Quiet hours start",
           "quiet_end": "Quiet hours end",
           "presence_entities": "People or occupancy entities",
-          "presence_mode": "Allow delivery when"
+          "presence_mode": "Allow delivery when",
+          "weekly_windows": "Weekly delivery windows (optional)"
         },
         "data_description": {
           "repeat": "Off runs once per incident at its first notification opportunity. On follows the reminder schedule. An already-running effect is not duplicated.",
@@ -173,7 +179,8 @@
           "quiet_start": "Optional daily quiet period in Home Assistant’s configured timezone. Both times are required. Overnight periods and daylight-saving changes follow the local clock.",
           "quiet_end": "Held alert delivery resumes within one minute after quiet hours, if the incident is still active and not acknowledged or snoozed. Recovery messages are skipped during quiet hours.",
           "presence_entities": "Optional. Person/device tracker home or binary/input boolean on means present. Leave empty to ignore presence. Unknown/missing states never prove everyone is away.",
-          "presence_mode": "Any present: allow when at least one selected entity is home/on. Everyone away: allow only when all selected entities are known and neither home nor on."
+          "presence_mode": "Any present: allow when at least one selected entity is home/on. Everyone away: allow only when all selected entities are known and neither home nor on.",
+          "weekly_windows": "Deliver only inside these local-time windows. Empty allows all week. Overnight windows continue into the next day. Quiet hours and presence rules still apply. Start is inclusive; end is exclusive."
         }
       },
       "delivery": {
@@ -188,7 +195,8 @@
           "group_window": "Grouping window (seconds)",
           "rate_limit": "Minimum time between notifications (minutes)",
           "history_limit": "Recent history entries to retain",
-          "stages": "Escalation stages"
+          "stages": "Escalation stages",
+          "weekly_windows": "Weekly delivery windows (optional)"
         },
         "data_description": {
           "quiet_start": "Optional daily quiet period in Home Assistant’s configured timezone. Both times are required. Overnight periods and daylight-saving changes follow the local clock.",
@@ -199,12 +207,34 @@
           "group_window": "Collect alert notifications for 1–300 seconds when a group is set. A new reminder replaces that alert’s pending message without postponing the existing group deadline.",
           "rate_limit": "Zero disables throttling. Otherwise coalesce reminders until this minimum interval has elapsed. Limits are shared by matching group/destination settings, and reset on Home Assistant restart.",
           "history_limit": "0 disables history; otherwise keep up to 100 metadata entries. Default 50. History contains lifecycle/output events and error categories, not messages. Enable incident restoration to keep history across reloads.",
-          "stages": "Add up to 10 stages with distinct elapsed-minute thresholds. Later recipients and outputs accumulate. Optional interval replaces the reminder cadence from that stage. Acknowledge stops escalation; snooze silences delivery without resetting incident age. After downtime, at most one catch-up delivery uses the latest reached stage."
+          "stages": "Add up to 10 stages with distinct elapsed-minute thresholds. Later recipients and outputs accumulate. Optional interval replaces the reminder cadence from that stage. Acknowledge stops escalation; snooze silences delivery without resetting incident age. After downtime, at most one catch-up delivery uses the latest reached stage.",
+          "weekly_windows": "Deliver only inside these local-time windows. Empty allows all week. Overnight windows continue into the next day. Quiet hours and presence rules still apply. Start is inclusive; end is exclusive."
         }
       },
       "profile_review": {
         "title": "Review reusable profile",
         "description": "**{name}**\n\nNotification destinations: {destinations}\n\nDevice outputs: {outputs}\n\nSave this profile, then select it in the Destinations step of one or more alerts. It has no watched entity and sends nothing on its own. Editing it affects all referencing alerts."
+      },
+      "duplicate": {
+        "title": "Duplicate an alert or profile",
+        "description": "Copy configuration into a new draft. Incident state, acknowledgement, history, and device identity are not copied. Review every step before saving.",
+        "data": {
+          "source": "Entry to copy"
+        }
+      },
+      "import_yaml": {
+        "title": "Import legacy Alert YAML",
+        "description": "Paste a single definition, named definitions, or an alert: section. Select one alert to review and create. No notification is sent by this preview. Disable the corresponding legacy alert before saving its replacement to avoid duplicate reminders. File includes and secrets must be expanded in the pasted text.",
+        "data": {
+          "yaml": "Legacy Alert YAML"
+        }
+      },
+      "import_select": {
+        "title": "Choose an alert to import",
+        "description": "One alert is created per workflow. Existing YAML and alert entities are not modified. You can edit all settings before the final review.",
+        "data": {
+          "source": "Alert definition"
+        }
       }
     },
     "error": {
@@ -221,14 +251,17 @@
       "invalid_number": "Enter a finite number.",
       "incompatible_thresholds": "Choose one problem threshold and its corresponding recovery threshold. Recovery must be at or beyond the problem threshold in the recovery direction.",
       "invalid_output": "Check the output settings: choose valid entities, a name, finite values within the displayed limits, and any required provider or audio fields.",
-      "invalid_actions": "Enter a valid Home Assistant action sequence. Check device actions, templates, and required fields."
+      "invalid_actions": "Enter a valid Home Assistant action sequence. Check device actions, templates, and required fields.",
+      "invalid_conditions": "Check the rule entities, comparisons, and values.",
+      "invalid_import": "Invalid legacy Alert YAML. Paste only alert definitions, expand secrets/includes, and remove aliases or unsupported fields.",
+      "invalid_source": "Choose an existing entry."
     }
   },
   "options": {
     "step": {
       "init": {
         "title": "Alert condition",
-        "description": "Watch an exact state, or set one numeric problem threshold. Numeric thresholds use the source entity's units; no unit conversion is performed. For compound conditions, select a Template binary sensor helper.",
+        "description": "Watch an exact state or numeric threshold, or add compound rules. Compound rules replace single-source matching and use ALL (AND) or ANY (OR). Numeric compound comparisons use raw source units and have no hysteresis. Profiles contain only shared delivery destinations and outputs.",
         "data": {
           "name": "Alert name",
           "entity_id": "Entity to watch",
@@ -238,7 +271,9 @@
           "numeric_recover_above": "Recover above (for a below threshold)",
           "numeric_recover_below": "Recover below (for an above threshold)",
           "numeric_unit": "Expected numeric unit (optional)",
-          "kind": "Create an alert or a reusable profile"
+          "kind": "Create an alert or a reusable profile",
+          "conditions": "Compound rules (optional)",
+          "condition_mode": "Combine compound rules"
         },
         "data_description": {
           "state": "Underlying state string, such as on or open. Ignored when a numeric problem threshold is set.",
@@ -247,7 +282,8 @@
           "numeric_recover_above": "Optional. Keep the incident active until strictly above this value. Must be at least the problem-below threshold.",
           "numeric_recover_below": "Optional. Keep the incident active until strictly below this value. Must be at most the problem-above threshold.",
           "numeric_unit": "Exact unit attribute, for example %, °C, or °F. A missing or different unit suspends evaluation. Empty accepts the source's current units.",
-          "entity_id": "Required for alerts. Profiles only contain shared notification destinations and device outputs; they do not monitor a source."
+          "entity_id": "Primary source for existing templates. Optional with compound rules; defaults to their first entity. Profiles do not watch a source.",
+          "conditions": "Up to 20 rules. Empty uses the single watched entity. Unknown inputs follow the unavailable-source policy when known rules cannot determine the result."
         }
       },
       "timing": {
@@ -375,7 +411,8 @@
           "quiet_start": "Quiet hours start",
           "quiet_end": "Quiet hours end",
           "presence_entities": "People or occupancy entities",
-          "presence_mode": "Allow delivery when"
+          "presence_mode": "Allow delivery when",
+          "weekly_windows": "Weekly delivery windows (optional)"
         },
         "data_description": {
           "repeat": "Off runs once per incident at its first notification opportunity. On follows the reminder schedule. An already-running effect is not duplicated.",
@@ -397,7 +434,8 @@
           "quiet_start": "Optional daily quiet period in Home Assistant’s configured timezone. Both times are required. Overnight periods and daylight-saving changes follow the local clock.",
           "quiet_end": "Held alert delivery resumes within one minute after quiet hours, if the incident is still active and not acknowledged or snoozed. Recovery messages are skipped during quiet hours.",
           "presence_entities": "Optional. Person/device tracker home or binary/input boolean on means present. Leave empty to ignore presence. Unknown/missing states never prove everyone is away.",
-          "presence_mode": "Any present: allow when at least one selected entity is home/on. Everyone away: allow only when all selected entities are known and neither home nor on."
+          "presence_mode": "Any present: allow when at least one selected entity is home/on. Everyone away: allow only when all selected entities are known and neither home nor on.",
+          "weekly_windows": "Deliver only inside these local-time windows. Empty allows all week. Overnight windows continue into the next day. Quiet hours and presence rules still apply. Start is inclusive; end is exclusive."
         }
       },
       "delivery": {
@@ -412,7 +450,8 @@
           "group_window": "Grouping window (seconds)",
           "rate_limit": "Minimum time between notifications (minutes)",
           "history_limit": "Recent history entries to retain",
-          "stages": "Escalation stages"
+          "stages": "Escalation stages",
+          "weekly_windows": "Weekly delivery windows (optional)"
         },
         "data_description": {
           "quiet_start": "Optional daily quiet period in Home Assistant’s configured timezone. Both times are required. Overnight periods and daylight-saving changes follow the local clock.",
@@ -423,7 +462,8 @@
           "group_window": "Collect alert notifications for 1–300 seconds when a group is set. A new reminder replaces that alert’s pending message without postponing the existing group deadline.",
           "rate_limit": "Zero disables throttling. Otherwise coalesce reminders until this minimum interval has elapsed. Limits are shared by matching group/destination settings, and reset on Home Assistant restart.",
           "history_limit": "0 disables history; otherwise keep up to 100 metadata entries. Default 50. History contains lifecycle/output events and error categories, not messages. Enable incident restoration to keep history across reloads.",
-          "stages": "Add up to 10 stages with distinct elapsed-minute thresholds. Later recipients and outputs accumulate. Optional interval replaces the reminder cadence from that stage. Acknowledge stops escalation; snooze silences delivery without resetting incident age. After downtime, at most one catch-up delivery uses the latest reached stage."
+          "stages": "Add up to 10 stages with distinct elapsed-minute thresholds. Later recipients and outputs accumulate. Optional interval replaces the reminder cadence from that stage. Acknowledge stops escalation; snooze silences delivery without resetting incident age. After downtime, at most one catch-up delivery uses the latest reached stage.",
+          "weekly_windows": "Deliver only inside these local-time windows. Empty allows all week. Overnight windows continue into the next day. Quiet hours and presence rules still apply. Start is inclusive; end is exclusive."
         }
       },
       "profile_review": {
@@ -445,7 +485,10 @@
       "invalid_number": "Enter a finite number.",
       "incompatible_thresholds": "Choose one problem threshold and its corresponding recovery threshold. Recovery must be at or beyond the problem threshold in the recovery direction.",
       "invalid_output": "Check the output settings: choose valid entities, a name, finite values within the displayed limits, and any required provider or audio fields.",
-      "invalid_actions": "Enter a valid Home Assistant action sequence. Check device actions, templates, and required fields."
+      "invalid_actions": "Enter a valid Home Assistant action sequence. Check device actions, templates, and required fields.",
+      "invalid_conditions": "Check the rule entities, comparisons, and values.",
+      "invalid_import": "Invalid legacy Alert YAML. Paste only alert definitions, expand secrets/includes, and remove aliases or unsupported fields.",
+      "invalid_source": "Choose an existing entry."
     }
   },
   "entity": {
@@ -577,6 +620,19 @@
       "options": {
         "alert": "Alert",
         "profile": "Reusable output profile"
+      }
+    },
+    "condition_mode": {
+      "options": {
+        "all": "All rules (AND)",
+        "any": "Any rule (OR)"
+      }
+    },
+    "setup_action": {
+      "options": {
+        "new": "New alert or profile",
+        "duplicate": "Duplicate an existing entry",
+        "import_yaml": "Import legacy Alert YAML"
       }
     }
   }

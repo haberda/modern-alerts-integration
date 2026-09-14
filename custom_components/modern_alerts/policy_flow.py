@@ -4,13 +4,44 @@ import voluptuous as vol
 from homeassistant.helpers import selector
 
 from .models import AlertConfig, InvalidConfig
+from .policies import WEEKDAYS
 from .profiles import resolve
 
-POLICY_FIELDS = ("quiet_start", "quiet_end", "presence_entities", "presence_mode")
+POLICY_FIELDS = (
+    "quiet_start",
+    "quiet_end",
+    "presence_entities",
+    "presence_mode",
+    "weekly_windows",
+)
 
 
 def routing_fields():
     return {
+        vol.Optional("weekly_windows"): selector.ObjectSelector(
+            {
+                "multiple": True,
+                "fields": {
+                    "days": {
+                        "label": "Starting weekdays",
+                        "required": True,
+                        "selector": selector.SelectSelector(
+                            {"options": list(WEEKDAYS), "multiple": True}
+                        ),
+                    },
+                    "start": {
+                        "label": "Delivery window start",
+                        "required": True,
+                        "selector": selector.TimeSelector(),
+                    },
+                    "end": {
+                        "label": "Delivery window end",
+                        "required": True,
+                        "selector": selector.TimeSelector(),
+                    },
+                },
+            }
+        ),
         vol.Optional("quiet_start"): selector.TimeSelector(),
         vol.Optional("quiet_end"): selector.TimeSelector(),
         vol.Optional("presence_entities"): selector.EntitySelector(
