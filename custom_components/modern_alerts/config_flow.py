@@ -68,6 +68,7 @@ class AlertFlowSteps(OutputFlowSteps):
             "intervals": [{"minutes": n} for n in self._values.get("repeat", [30])],
             "skip_first": self._values.get("skip_first", False),
             "can_acknowledge": self._values.get("can_acknowledge", True),
+            "resolution_after_ack": self._values.get("resolution_after_ack", True),
             "evaluate_on_start": self._values.get("evaluate_on_start", False),
             "restore_state": self._values.get("restore_state", False),
             "snooze_minutes": self._values.get("snooze_minutes", 30),
@@ -114,6 +115,9 @@ class AlertFlowSteps(OutputFlowSteps):
             vol.Required("intervals"): interval_selector,
             vol.Required("skip_first", default=False): selector.BooleanSelector(),
             vol.Required("can_acknowledge", default=True): selector.BooleanSelector(),
+            vol.Required(
+                "resolution_after_ack", default=True
+            ): selector.BooleanSelector(),
             vol.Required(
                 "evaluate_on_start", default=False
             ): selector.BooleanSelector(),

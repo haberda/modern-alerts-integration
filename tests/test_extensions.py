@@ -412,3 +412,28 @@ async def test_disabling_restore_and_deleting_clear_storage(hass, notifications)
     assert await hass.config_entries.async_remove(entry.entry_id)
     await hass.async_block_till_done()
     assert await Store(hass, 1, key).async_load() is None
+
+
+@pytest.mark.parametrize(
+    "enabled,ack,snooze,expected",
+    [
+        (True, True, False, 2),
+        (False, True, False, 1),
+        (False, False, False, 2),
+        (False, False, True, 2),
+    ],
+)
+async def test_resolution_after_ack_policy(
+    hass, make_runtime, notifications, enabled, ack, snooze, expected
+):
+    runtime = make_runtime(resolution_after_ack=enabled)
+    await set_state(hass, "on")
+    if ack:
+        runtime.acknowledge(True)
+    if snooze:
+        runtime.snooze(5)
+    await set_state(hass, "off")
+    assert len(notifications) == expected
+    assert not runtime.firing
+    await set_state(hass, "on")
+    assert not runtime.acknowledged

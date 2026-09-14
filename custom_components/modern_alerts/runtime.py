@@ -284,12 +284,14 @@ class AlertRuntime:
     @callback
     def _transition(self, active: bool) -> None:
         previous_variables = self._output_variables()
+        send_done = self.attempted and (
+            self.config.resolution_after_ack or not self.acknowledged
+        )
         self.outputs.stop()
         self._generation += 1
         self.pending_active = self.pending_due = None
         self.snoozed_until = None
         self.acknowledged = False
-        send_done = self.attempted
         self.attempted = False
         self.firing = active
         self.incident_id = uuid4().hex if active else ""

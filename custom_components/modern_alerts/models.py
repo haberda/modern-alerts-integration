@@ -37,6 +37,7 @@ class AlertConfig:
     repeat: tuple[float, ...] = (30.0,)
     skip_first: bool = False
     can_acknowledge: bool = True
+    resolution_after_ack: bool = True
     notifiers: tuple[str, ...] = ()
     notify_entities: tuple[str, ...] = ()
     message: str | None = None
@@ -130,6 +131,7 @@ class AlertConfig:
         for key, default in (
             ("skip_first", False),
             ("can_acknowledge", True),
+            ("resolution_after_ack", True),
             ("evaluate_on_start", False),
             ("restore_state", False),
         ):
@@ -216,6 +218,7 @@ class AlertConfig:
             "repeat": list(self.repeat),
             "skip_first": self.skip_first,
             "can_acknowledge": self.can_acknowledge,
+            "resolution_after_ack": self.resolution_after_ack,
             "notifiers": list(self.notifiers),
             "notify_entities": list(self.notify_entities),
             "message": self.message,

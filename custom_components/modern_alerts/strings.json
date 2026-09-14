@@ -38,7 +38,8 @@
           "unavailable_policy": "When the source is unavailable",
           "enable_snooze": "Allow temporary snooze",
           "snooze_minutes": "Default snooze duration (minutes)",
-          "action_buttons": "Add Companion phone controls"
+          "action_buttons": "Add Companion phone controls",
+          "resolution_after_ack": "Send resolution notification after acknowledgement"
         },
         "data_description": {
           "intervals": "One row gives a fixed interval. For example, 15, 30, 60 uses those delays in sequence, then repeats every 60 minutes. Minimum 0.016 minutes.",
@@ -50,7 +51,8 @@
           "unavailable_policy": "Resolve treats a nonmatching unknown/unavailable state as clear. Suspend preserves the incident and pauses reminders until usable data returns. Invalid numeric values always suspend.",
           "enable_snooze": "Allow the Snooze button and action. Snooze is separate from acknowledgement; reminders continue advancing silently.",
           "snooze_minutes": "Used by the device and phone buttons, and by the snooze action when no duration is supplied. Maximum one week.",
-          "action_buttons": "Add incident-specific Acknowledge, Snooze, and Open alert controls to direct mobile_app notify actions. Test and resolution messages have no generated controls. Automatic controls replace any actions in extra data for these destinations."
+          "action_buttons": "Add incident-specific Acknowledge, Snooze, and Open alert controls to direct mobile_app notify actions. Test and resolution messages have no generated controls. Automatic controls replace any actions in extra data for these destinations.",
+          "resolution_after_ack": "Off suppresses resolution messages and recovery outputs when the incident is acknowledged. Cleanup still runs. Snooze does not suppress resolution."
         }
       },
       "notifications": {
@@ -216,7 +218,8 @@
           "unavailable_policy": "When the source is unavailable",
           "enable_snooze": "Allow temporary snooze",
           "snooze_minutes": "Default snooze duration (minutes)",
-          "action_buttons": "Add Companion phone controls"
+          "action_buttons": "Add Companion phone controls",
+          "resolution_after_ack": "Send resolution notification after acknowledgement"
         },
         "data_description": {
           "intervals": "One row gives a fixed interval. For example, 15, 30, 60 uses those delays in sequence, then repeats every 60 minutes. Minimum 0.016 minutes.",
@@ -228,7 +231,8 @@
           "unavailable_policy": "Resolve treats a nonmatching unknown/unavailable state as clear. Suspend preserves the incident and pauses reminders until usable data returns. Invalid numeric values always suspend.",
           "enable_snooze": "Allow the Snooze button and action. Snooze is separate from acknowledgement; reminders continue advancing silently.",
           "snooze_minutes": "Used by the device and phone buttons, and by the snooze action when no duration is supplied. Maximum one week.",
-          "action_buttons": "Add incident-specific Acknowledge, Snooze, and Open alert controls to direct mobile_app notify actions. Test and resolution messages have no generated controls. Automatic controls replace any actions in extra data for these destinations."
+          "action_buttons": "Add incident-specific Acknowledge, Snooze, and Open alert controls to direct mobile_app notify actions. Test and resolution messages have no generated controls. Automatic controls replace any actions in extra data for these destinations.",
+          "resolution_after_ack": "Off suppresses resolution messages and recovery outputs when the incident is acknowledged. Cleanup still runs. Snooze does not suppress resolution."
         }
       },
       "notifications": {
