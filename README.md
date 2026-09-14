@@ -2,7 +2,7 @@
 
 A custom Home Assistant integration that reproduces the built-in Alert lifecycle with setup and editing through **Settings → Devices & services**. Each alert has a status sensor, a problem binary sensor, and buttons to acknowledge, snooze, resume, and test notifications.
 
-**Version 0.2.0 targets Home Assistant 2026.9.2 (Python 3.14).** The test suite runs against that exact release. Earlier versions are not supported; newer releases require compatibility testing. This integration uses its own `modern_alerts` actions and standard entities, so existing `alert.*` references need migration.
+**Version 0.3.0 targets Home Assistant 2026.9.2 (Python 3.14).** The test suite runs against that exact release. Earlier versions are not supported; newer releases require compatibility testing. This integration uses its own `modern_alerts` actions and standard entities, so existing `alert.*` references need migration.
 
 ## Install
 
@@ -22,11 +22,11 @@ This is a custom integration, not an automation blueprint. After installation, c
 
 ## Create an alert
 
-The setup wizard walks through five steps:
+The setup wizard walks through five main steps, with an optional output editor:
 
 1. **Condition:** name, source entity, and the exact problem state. Use `on` for a typical door binary sensor. Match the underlying state string, not a translated label such as “Open.” For numeric alerts, enter one problem threshold and an optional recovery threshold; the exact state field is then ignored. An optional expected unit protects against changes in source units. Use a Template binary sensor helper for compound conditions.
 2. **Timing:** add one interval for fixed repetition or several intervals in order. Values are minutes and may be fractional (minimum `0.016`). The final interval repeats indefinitely. Choose whether to delay the first notification and whether acknowledgement is allowed. Set sustained activation/recovery delays, startup/restoration policy, unavailable-source policy, snooze defaults, and Companion phone controls here.
-3. **Destinations:** choose legacy notify actions, notify entities, or leave both lists empty for a state-only alert. Missing legacy action names can be entered manually.
+3. **Destinations:** choose legacy notify actions, notify entities, or leave both lists empty for a state-only alert. Missing legacy action names can be entered manually. Enable **Add or edit light, siren, speaker, and custom outputs** to configure device effects before continuing to Content.
 4. **Content:** optional message, title, resolution message, and provider data. Text fields support Home Assistant templates. An empty message uses the alert name; an empty resolution message disables completion notifications. The alert name is literal text. Extra data is an optional YAML mapping entered within the UI and is forwarded unchanged.
 5. **Review:** inspect the source's current state, schedule, and destinations before saving.
 
@@ -46,6 +46,9 @@ Open the alert's device under Modern Alerts to access its entities. You can also
 | Snooze button | Silences reminders for the configured duration without changing acknowledgement. |
 | Cancel snooze button | Ends temporary silence without clearing acknowledgement. |
 | Resume reminders button | Clears acknowledgement and snooze. The next reminder follows the existing schedule; there is no immediate send. |
+| Output to test selector | Selects one configured device output for an isolated test. |
+| Test selected output button | Starts that output only, without creating an incident or sending phone notifications. |
+| Stop outputs button | Cancels active effects and tests with cleanup; does not acknowledge the incident. |
 | Test notification button | Sends the current alert message without creating an incident or enabling a resolution notification. Available when destinations are configured. |
 
 Acknowledge does not disable monitoring. When the source clears, the incident ends, any eligible resolution notification is sent, and the next incident starts unacknowledged. Timers continue advancing silently while acknowledged.
@@ -71,6 +74,34 @@ tag: garage-door
 
 Set the resolution message to `clear_notification` to request clearing that tagged notification. Actual replacement/clearing behavior depends on the provider and phone platform. With automatic phone controls disabled, arbitrary provider-supported buttons can be included in the same data mapping; their callback automation is configured separately, as with built-in Alert.
 
+## Device outputs
+
+Alerts can now notify through **lights, sirens, TTS, audio, and custom actions**, alongside or instead of phone notifications. Configure them directly inside the alert; no intermediary automation is required. In Destinations, enable **Add or edit light, siren, speaker, and custom outputs**, then use Add/Edit/Remove in the output menu. Changes take effect when the entire alert is saved.
+
+| Output | Configuration and behavior |
+| --- | --- |
+| Light | Select lights, Blink or Steady, optional color/brightness, duration, and restoration. Blink alternates on/off at the chosen interval; it does not require a device-native flash effect. |
+| Siren | Select sirens, optional tone/volume, and maximum sounding duration. Both a device duration request and integration-owned cleanup are used; device capabilities vary. |
+| Spoken announcement | Select a TTS provider entity and media players, optional language/message/volume, and maximum playback duration. The message defaults to the alert message. An optional recovery message runs on resolution. |
+| Chime or audio | Select media players, an audio URL or `media-source://` URI, optional content type (defaults to `music`), volume, and maximum playback duration. The player must support the source/content type and be able to reach the media. |
+| Custom actions | Use Home Assistant's native action editor for alert, cleanup, and optional recovery sequences. Actions can use `alert_name`, `entity_id` (watched source), `incident_id`, and the rendered `message`. No separate automation or script entity is necessary. |
+
+Each output has **Run at every reminder**. On follows the existing alert schedule; off attempts the output once per incident at its first notification opportunity, respecting delayed-first delivery, acknowledgement, and snooze. Already-running effects are not duplicated. Once-per-incident attempt markers are saved when incident restoration is enabled. After a reload, interrupted effects are not replayed immediately; repeat-enabled outputs resume at the next eligible reminder.
+
+Durations range from 0.1 to 300 seconds; blink intervals range from 0.5 to 60 seconds. The duration is an effect/playback limit, so a long spoken message or audio clip may be cut short. Providers have a separate ten-second action timeout. Up to 20 outputs may be configured per alert, with up to 20 devices per built-in output.
+
+Acknowledgement, snooze, source suspension, resolution, edits, and unload cancel active effects. Light cleanup restores the prior on/off state and supported color/brightness settings when enabled, otherwise turns the light off. Siren cleanup turns it off. Speaker cleanup stops owned playback and optionally restores its previous volume. Resuming previous music is device-specific and is not implemented. Observed external changes cause that device session to yield control and skip restoration/stop commands, preserving the newer choice. Devices that report state without action context may conservatively be treated as externally changed; restoration is best effort.
+
+Built-in outputs share a lock per target entity across alerts. A second effect waits for the current owner's effect and cleanup to finish; cancelling the waiter does not stop the owner. Waiting is bounded to ten seconds, after which a busy target is reported as a timeout. A repeat-enabled output can retry at its next reminder. This coordinates entity IDs; overlapping group entities or device aliases cannot be inferred as the same physical device.
+
+**Custom actions require explicit cleanup.** Cancelling a sequence stops its remaining steps but cannot undo arbitrary actions already performed. Configure Stop / cleanup actions to turn off what the sequence enables. Cleanup runs on cancellation, completion, errors, or duration expiry and has a ten-second budget. Optional recovery actions are a separate, bounded sequence and should be self-contained; they do not run the stop sequence afterward. Detached work, such as a script started with `script.turn_on`, belongs to that script and requires an explicit stop action. Custom sequences are serialized within their own output but do not participate in built-in device locks.
+
+Physical effects and pre-effect device snapshots are not persisted. Clean reload/shutdown attempts cleanup; a crash or loss of connectivity cannot guarantee device restoration. Prefer a siren with hardware duration support when that matters. Home Assistant may reject new custom script runs during shutdown, including custom cleanup; built-in device cleanup is still attempted.
+
+To test, save the alert, open its device, choose **Output to test**, and press **Test selected output**. This runs only that bounded effect and its cleanup. **Stop outputs** ends it early. Tests do not create an incident or enable a resolution message. The existing **Test notification** button still tests phone/notify destinations only.
+
+The status sensor exposes `configured_outputs` (IDs mapped to names), `active_outputs` (running or waiting output IDs), and `output_errors` (redacted categories per output/target). Output failures are independent of phone delivery and other devices. Tests start asynchronously; inspect these attributes for results. The `test_output` action can optionally select an ID explicitly, while the device picker provides the normal UI workflow.
+
 ## Actions and migration
 
 All actions target this integration's **status sensor**, not the watched source or an `alert.*` entity. Find the actual entity ID on the alert device; generated names can vary with existing entities and user renames.
@@ -83,6 +114,8 @@ All actions target this integration's **status sensor**, not the watched source 
 | — | `modern_alerts.test_notification` | — |
 | — | `modern_alerts.snooze` | Optional `minutes`; otherwise the alert default |
 | — | `modern_alerts.cancel_snooze` | Keeps acknowledgement |
+| — | `modern_alerts.test_output` | Optional `output_id`; otherwise the device selector |
+| — | `modern_alerts.stop_outputs` | Stop active effects and tests with cleanup |
 
 Example acknowledgement action, also available through the automation action editor:
 
@@ -139,7 +172,7 @@ python -m venv .venv
 .venv/bin/python -m pytest --timeout=20 --cov=custom_components.modern_alerts --cov-report=term-missing
 ```
 
-The pinned test fixture package installs Home Assistant 2026.9.2. Tests cover lifecycle behavior, notification adapters, validation, real config/options managers, registry entities, action targeting, deletion/reload, restored deadlines, debounce cancellation, hysteresis/unit checks, snooze, stale phone actions, slow-provider races, and creation/edit/deletion through the authenticated HTTP endpoints used by the UI. External notification delivery is mocked; the HTTP workflow test uses a local test server. These checks do not substitute for rendering the forms in an installed frontend or testing delivery on a real phone.
+The pinned test fixture package installs Home Assistant 2026.9.2. Tests cover lifecycle behavior, notification adapters, validation, real config/options managers, registry entities, action targeting, deletion/reload, restored deadlines, debounce cancellation, hysteresis/unit checks, snooze, stale phone actions, output cleanup, shared-device ownership, real light service handling, custom-action cancellation, slow-provider races, and creation/edit/deletion through the authenticated HTTP endpoints used by the UI. External notification delivery is mocked; the HTTP workflow test uses a local test server. These checks do not substitute for rendering the forms in an installed frontend or testing delivery on a real phone.
 
 Before using on your installation, create an alert watching an Input boolean helper with a short interval, test immediate and delayed notifications, acknowledge/resume it, clear it, and edit/delete it through Devices & services. Verify the intended behavior with your actual notification provider.
 
