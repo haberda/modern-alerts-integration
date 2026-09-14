@@ -10,9 +10,11 @@ from homeassistant.helpers import selector
 from .const import DOMAIN, MIN_REPEAT
 from .models import AlertConfig, InvalidConfig
 from .output_flow import OutputFlowSteps
+from .policy_flow import DeliveryFlowSteps
+from .profiles import resolve
 
 
-class AlertFlowSteps(OutputFlowSteps):
+class AlertFlowSteps(OutputFlowSteps, DeliveryFlowSteps):
     """Shared create/edit forms; every field can be edited without YAML files."""
 
     _values: dict[str, Any]
@@ -32,23 +34,38 @@ class AlertFlowSteps(OutputFlowSteps):
         if user_input is not None:
             # Clearing optional numeric fields switches back to exact state matching.
             values = {key: None for key in numeric_fields} | user_input
+            values["kind"] = (
+                user_input.get("kind", "alert")
+                if step_id == "user"
+                else self._values.get("kind", "alert")
+            )
+            if values["kind"] == "profile":
+                values["entity_id"] = "sensor.modern_alerts_profile"
             try:
                 AlertConfig.from_dict(values, self.hass)
             except InvalidConfig as err:
                 errors[err.field] = err.code
             else:
                 self._values.update(values)
+                if values["kind"] == "profile":
+                    return await self.async_step_notifications()
                 return await self.async_step_timing()
         fields = {
             vol.Required("name"): selector.TextSelector(),
-            vol.Required("entity_id"): selector.EntitySelector(),
+            vol.Optional("entity_id"): selector.EntitySelector(),
             vol.Required("state", default="on"): selector.TextSelector(),
         }
+        if step_id == "user":
+            fields[vol.Required("kind", default="alert")] = selector.SelectSelector(
+                {"options": ["alert", "profile"], "translation_key": "entry_kind"}
+            )
         for key in numeric_fields[:-1]:
             fields[vol.Optional(key)] = selector.NumberSelector(
                 {"step": "any", "mode": "box"}
             )
         fields[vol.Optional("numeric_unit")] = selector.TextSelector()
+        if step_id == "init" and self._values.get("kind") == "profile":
+            fields = {vol.Required("name"): selector.TextSelector()}
         return self.async_show_form(
             step_id=step_id,
             data_schema=self._schema(
@@ -80,6 +97,8 @@ class AlertFlowSteps(OutputFlowSteps):
         }
         if user_input is not None:
             values.update(user_input)
+            self._configure_delivery = user_input.get("configure_delivery", False)
+            values.pop("configure_delivery", None)
             try:
                 repeat = [row["minutes"] for row in values["intervals"]]
                 updated = {k: v for k, v in values.items() if k != "intervals"}
@@ -113,6 +132,9 @@ class AlertFlowSteps(OutputFlowSteps):
         )
         fields = {
             vol.Required("intervals"): interval_selector,
+            vol.Required(
+                "configure_delivery", default=False
+            ): selector.BooleanSelector(),
             vol.Required("skip_first", default=False): selector.BooleanSelector(),
             vol.Required("can_acknowledge", default=True): selector.BooleanSelector(),
             vol.Required(
@@ -153,10 +175,16 @@ class AlertFlowSteps(OutputFlowSteps):
             "notifiers": self._values.get("notifiers", []),
             "notify_entities": self._values.get("notify_entities", []),
             "configure_outputs": bool(self._values.get("outputs")),
+            "profile_ids": self._values.get("profile_ids", []),
         }
         if user_input is not None:
             # An omitted optional list means clear it, including during editing.
-            values = {"notifiers": [], "notify_entities": [], **user_input}
+            values = {
+                "notifiers": [],
+                "notify_entities": [],
+                "profile_ids": [],
+                **user_input,
+            }
             try:
                 config = AlertConfig.from_dict(
                     {**self._values, **values, "data": {}}, self.hass
@@ -167,6 +195,7 @@ class AlertFlowSteps(OutputFlowSteps):
                 self._values.update(
                     notifiers=list(config.notifiers),
                     notify_entities=list(config.notify_entities),
+                    profile_ids=list(config.profile_ids),
                 )
                 if user_input.get("configure_outputs"):
                     return await self.async_step_outputs()
@@ -191,6 +220,22 @@ class AlertFlowSteps(OutputFlowSteps):
                 "configure_outputs", default=False
             ): selector.BooleanSelector(),
         }
+        if self._values.get("kind") != "profile":
+            profiles = {
+                entry.entry_id: entry.title
+                for entry in self.hass.config_entries.async_entries(DOMAIN)
+                if (entry.options or entry.data).get("kind") == "profile"
+            }
+            for key in self._values.get("profile_ids", []):
+                profiles.setdefault(key, "Unavailable profile")
+            fields[vol.Optional("profile_ids")] = selector.SelectSelector(
+                {
+                    "options": [
+                        {"value": key, "label": name} for key, name in profiles.items()
+                    ],
+                    "multiple": True,
+                }
+            )
         return self.async_show_form(
             step_id="notifications",
             data_schema=self._schema(fields, values),
@@ -198,6 +243,8 @@ class AlertFlowSteps(OutputFlowSteps):
         )
 
     async def async_step_messages(self, user_input=None):
+        if self._values.get("kind") == "profile":
+            return await self.async_step_profile_review()
         errors = {}
         values = {
             k: self._values.get(k) for k in ("message", "title", "done_message", "data")
@@ -216,6 +263,8 @@ class AlertFlowSteps(OutputFlowSteps):
                 errors[err.field] = err.code
             else:
                 self._values = config.as_dict()
+                if getattr(self, "_configure_delivery", False):
+                    return await self.async_step_delivery()
                 return await self.async_step_review()
         fields = {
             vol.Optional("message"): selector.TemplateSelector(),
@@ -235,12 +284,13 @@ class AlertFlowSteps(OutputFlowSteps):
         config = AlertConfig.from_dict(self._values, self.hass)
         if user_input is not None:
             return self._finish(config)
+        effective, missing = resolve(self.hass, config)
         source = self.hass.states.get(config.entity_id)
         intervals = ", ".join(f"{n:g}" for n in config.repeat)
-        targets = [f"notify.{n}" for n in config.notifiers] + list(
-            config.notify_entities
+        targets = [f"notify.{n}" for n in effective.notifiers] + list(
+            effective.notify_entities
         )
-        targets.extend(f"{item['name']} ({item['type']})" for item in config.outputs)
+        targets.extend(f"{item['name']} ({item['type']})" for item in effective.outputs)
         return self.async_show_form(
             step_id="review",
             data_schema=vol.Schema({}),
@@ -271,6 +321,15 @@ class AlertFlowSteps(OutputFlowSteps):
                 else "immediately",
                 "destinations": ", ".join(targets) or "Status only (no notifications)",
                 "completion": config.done_message or "No resolution notification",
+                "delivery_summary": "Stages: "
+                + (
+                    ", ".join(
+                        f"{stage['name']} at {stage['after']:g} minutes"
+                        for stage in config.stages
+                    )
+                    or "none"
+                )
+                + f". Profiles: {len(config.profile_ids)} ({len(missing)} unavailable). Group: {config.delivery.get('group') or 'none'}. Minimum notification interval: {config.delivery.get('rate_limit', 0):g} minutes. History: {config.history_limit} entries.",
             },
         )
 
@@ -287,7 +346,12 @@ class ModernAlertsConfigFlow(AlertFlowSteps, config_entries.ConfigFlow, domain=D
 
     @callback
     def _finish(self, config):
-        return self.async_create_entry(title=config.name, data=config.as_dict())
+        return self.async_create_entry(
+            title=f"Profile: {config.name}"
+            if config.kind == "profile"
+            else config.name,
+            data=config.as_dict(),
+        )
 
     @staticmethod
     @callback

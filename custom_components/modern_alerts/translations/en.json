@@ -13,7 +13,8 @@
           "numeric_above": "Problem above",
           "numeric_recover_above": "Recover above (for a below threshold)",
           "numeric_recover_below": "Recover below (for an above threshold)",
-          "numeric_unit": "Expected numeric unit (optional)"
+          "numeric_unit": "Expected numeric unit (optional)",
+          "kind": "Create an alert or a reusable profile"
         },
         "data_description": {
           "state": "Underlying state string, such as on or open. Ignored when a numeric problem threshold is set.",
@@ -21,7 +22,8 @@
           "numeric_above": "Optional. Start when the value is strictly above this number. Choose only one problem threshold.",
           "numeric_recover_above": "Optional. Keep the incident active until strictly above this value. Must be at least the problem-below threshold.",
           "numeric_recover_below": "Optional. Keep the incident active until strictly below this value. Must be at most the problem-above threshold.",
-          "numeric_unit": "Exact unit attribute, for example %, °C, or °F. A missing or different unit suspends evaluation. Empty accepts the source's current units."
+          "numeric_unit": "Exact unit attribute, for example %, °C, or °F. A missing or different unit suspends evaluation. Empty accepts the source's current units.",
+          "entity_id": "Required for alerts. Profiles only contain shared notification destinations and device outputs; they do not monitor a source."
         }
       },
       "timing": {
@@ -39,7 +41,8 @@
           "enable_snooze": "Allow temporary snooze",
           "snooze_minutes": "Default snooze duration (minutes)",
           "action_buttons": "Add Companion phone controls",
-          "resolution_after_ack": "Send resolution notification after acknowledgement"
+          "resolution_after_ack": "Send resolution notification after acknowledgement",
+          "configure_delivery": "Configure escalation, delivery rules, and history"
         },
         "data_description": {
           "intervals": "One row gives a fixed interval. For example, 15, 30, 60 uses those delays in sequence, then repeats every 60 minutes. Minimum 0.016 minutes.",
@@ -52,7 +55,8 @@
           "enable_snooze": "Allow the Snooze button and action. Snooze is separate from acknowledgement; reminders continue advancing silently.",
           "snooze_minutes": "Used by the device and phone buttons, and by the snooze action when no duration is supplied. Maximum one week.",
           "action_buttons": "Add incident-specific Acknowledge, Snooze, and Open alert controls to direct mobile_app notify actions. Test and resolution messages have no generated controls. Automatic controls replace any actions in extra data for these destinations.",
-          "resolution_after_ack": "Off suppresses resolution messages and recovery outputs when the incident is acknowledged. Cleanup still runs. Snooze does not suppress resolution."
+          "resolution_after_ack": "Off suppresses resolution messages and recovery outputs when the incident is acknowledged. Cleanup still runs. Snooze does not suppress resolution.",
+          "configure_delivery": "Open advanced delivery settings after Content. Leaving this off preserves existing settings."
         }
       },
       "notifications": {
@@ -61,12 +65,14 @@
         "data": {
           "notifiers": "Legacy notify actions",
           "notify_entities": "Notify entities",
-          "configure_outputs": "Add or edit light, siren, speaker, and custom outputs"
+          "configure_outputs": "Add or edit light, siren, speaker, and custom outputs",
+          "profile_ids": "Reusable profiles"
         },
         "data_description": {
           "notifiers": "Choose an action such as mobile_app_my_phone or persistent_notification. You can also enter a missing action name. Use a notify group for provider-specific top-level targets.",
           "notify_entities": "Uses notify.send_message. Home Assistant 2026.9.2 supports message and title only for these targets. Use a legacy action if you need extra data, tags, or action buttons.",
-          "configure_outputs": "Open the output editor next. Leaving this off preserves existing outputs. Phone destinations may be empty when using device outputs."
+          "configure_outputs": "Open the output editor next. Leaving this off preserves existing outputs. Phone destinations may be empty when using device outputs.",
+          "profile_ids": "Add shared destinations and outputs. Profile edits apply to every referencing alert at subsequent delivery opportunities. Unavailable profiles are reported on the status sensor."
         }
       },
       "messages": {
@@ -87,7 +93,7 @@
       },
       "review": {
         "title": "Review alert",
-        "description": "**{name}**\n\nWatch `{entity}` for `{state}`. Current source state and unit: `{current}`. Recovery: {recovery}.\n\nFirst notification after activation: {first}. Repeat delays in minutes: {schedule}; the final delay repeats indefinitely.\n\n{reliability}\n\nDestinations: {destinations}\n\nResolution: {completion}\n\nSubmit to save. No test notification is sent automatically. Startup evaluation or restored overdue reminders may send a real alert. Use the Test notification button on the alert device to test explicitly."
+        "description": "**{name}**\n\nWatch `{entity}` for `{state}`. Current source state and unit: `{current}`. Recovery: {recovery}.\n\nFirst notification after activation: {first}. Repeat delays in minutes: {schedule}; the final delay repeats indefinitely.\n\n{reliability}\n\nDestinations: {destinations}\n\nResolution: {completion}\n\n{delivery_summary}\n\nSubmit to save. No test notification is sent automatically. Startup evaluation or restored overdue reminders may send a real alert. Use the Test notification button on the alert device to test explicitly."
       },
       "outputs": {
         "title": "Alert outputs",
@@ -141,7 +147,11 @@
           "media_type": "Media content type",
           "actions": "Alert actions",
           "stop_actions": "Stop / cleanup actions",
-          "recovery_actions": "Recovery actions"
+          "recovery_actions": "Recovery actions",
+          "quiet_start": "Quiet hours start",
+          "quiet_end": "Quiet hours end",
+          "presence_entities": "People or occupancy entities",
+          "presence_mode": "Allow delivery when"
         },
         "data_description": {
           "repeat": "Off runs once per incident at its first notification opportunity. On follows the reminder schedule. An already-running effect is not duplicated.",
@@ -159,8 +169,42 @@
           "media_type": "Defaults to music. Override if your player requires another content type.",
           "actions": "Use the native action editor; no separate automation is needed. Variables: alert_name, entity_id (watched source), incident_id, and message.",
           "stop_actions": "Explicit cleanup for anything the custom actions leave enabled. Runs on duration expiry, acknowledgement, snooze, suspension, resolution, edits, or unload. Cleanup has a 10-second budget. These actions also run after an individual test.",
-          "recovery_actions": "Optional separate sequence for resolution after an earlier notification attempt. Use self-contained actions; recovery sequences do not run the stop sequence afterward."
+          "recovery_actions": "Optional separate sequence for resolution after an earlier notification attempt. Use self-contained actions; recovery sequences do not run the stop sequence afterward.",
+          "quiet_start": "Optional daily quiet period in Home Assistant’s configured timezone. Both times are required. Overnight periods and daylight-saving changes follow the local clock.",
+          "quiet_end": "Held alert delivery resumes within one minute after quiet hours, if the incident is still active and not acknowledged or snoozed. Recovery messages are skipped during quiet hours.",
+          "presence_entities": "Optional. Person/device tracker home or binary/input boolean on means present. Leave empty to ignore presence. Unknown/missing states never prove everyone is away.",
+          "presence_mode": "Any present: allow when at least one selected entity is home/on. Everyone away: allow only when all selected entities are known and neither home nor on."
         }
+      },
+      "delivery": {
+        "title": "Escalation and delivery rules",
+        "description": "Quiet hours and presence below apply to phone/notify destinations. Device outputs have their own rules. Escalation keeps the original destinations and adds each reached stage. Outputs assigned to a stage wait until that stage. Unassigned outputs are available from the start.",
+        "data": {
+          "quiet_start": "Quiet hours start",
+          "quiet_end": "Quiet hours end",
+          "presence_entities": "People or occupancy entities",
+          "presence_mode": "Allow delivery when",
+          "group": "Notification group (optional)",
+          "group_window": "Grouping window (seconds)",
+          "rate_limit": "Minimum time between notifications (minutes)",
+          "history_limit": "Recent history entries to retain",
+          "stages": "Escalation stages"
+        },
+        "data_description": {
+          "quiet_start": "Optional daily quiet period in Home Assistant’s configured timezone. Both times are required. Overnight periods and daylight-saving changes follow the local clock.",
+          "quiet_end": "Held alert delivery resumes within one minute after quiet hours, if the incident is still active and not acknowledged or snoozed. Recovery messages are skipped during quiet hours.",
+          "presence_entities": "Optional. Person/device tracker home or binary/input boolean on means present. Leave empty to ignore presence. Unknown/missing states never prove everyone is away.",
+          "presence_mode": "Any present: allow when at least one selected entity is home/on. Everyone away: allow only when all selected entities are known and neither home nor on.",
+          "group": "Alerts with the same group, destination list, title, and provider data share a summary. Blank keeps alerts separate. Multi-alert summaries omit generated phone controls; use the alert device to acknowledge each incident. Single-alert deliveries retain phone controls. Grouping applies to alert notifications only.",
+          "group_window": "Collect alert notifications for 1–300 seconds when a group is set. A new reminder replaces that alert’s pending message without postponing the existing group deadline.",
+          "rate_limit": "Zero disables throttling. Otherwise coalesce reminders until this minimum interval has elapsed. Limits are shared by matching group/destination settings, and reset on Home Assistant restart.",
+          "history_limit": "0 disables history; otherwise keep up to 100 metadata entries. Default 50. History contains lifecycle/output events and error categories, not messages. Enable incident restoration to keep history across reloads.",
+          "stages": "Add up to 10 stages with distinct elapsed-minute thresholds. Later recipients and outputs accumulate. Optional interval replaces the reminder cadence from that stage. Acknowledge stops escalation; snooze silences delivery without resetting incident age. After downtime, at most one catch-up delivery uses the latest reached stage."
+        }
+      },
+      "profile_review": {
+        "title": "Review reusable profile",
+        "description": "**{name}**\n\nNotification destinations: {destinations}\n\nDevice outputs: {outputs}\n\nSave this profile, then select it in the Destinations step of one or more alerts. It has no watched entity and sends nothing on its own. Editing it affects all referencing alerts."
       }
     },
     "error": {
@@ -173,7 +217,7 @@
       "entity_data_unsupported": "Notify entities do not accept extra data in Home Assistant 2026.9.2. Clear this field, or choose only legacy notify actions.",
       "invalid_boolean": "Select an on/off value.",
       "invalid_duration": "Enter a finite nonnegative delay that fits a valid date. Snooze must be greater than zero and at most 10080 minutes.",
-      "invalid_policy": "Select Resolve or Suspend.",
+      "invalid_policy": "Check both quiet-hour times, presence settings, stage thresholds, destination names, and finite values within the displayed limits. Stage thresholds must be distinct and greater than zero.",
       "invalid_number": "Enter a finite number.",
       "incompatible_thresholds": "Choose one problem threshold and its corresponding recovery threshold. Recovery must be at or beyond the problem threshold in the recovery direction.",
       "invalid_output": "Check the output settings: choose valid entities, a name, finite values within the displayed limits, and any required provider or audio fields.",
@@ -193,7 +237,8 @@
           "numeric_above": "Problem above",
           "numeric_recover_above": "Recover above (for a below threshold)",
           "numeric_recover_below": "Recover below (for an above threshold)",
-          "numeric_unit": "Expected numeric unit (optional)"
+          "numeric_unit": "Expected numeric unit (optional)",
+          "kind": "Create an alert or a reusable profile"
         },
         "data_description": {
           "state": "Underlying state string, such as on or open. Ignored when a numeric problem threshold is set.",
@@ -201,7 +246,8 @@
           "numeric_above": "Optional. Start when the value is strictly above this number. Choose only one problem threshold.",
           "numeric_recover_above": "Optional. Keep the incident active until strictly above this value. Must be at least the problem-below threshold.",
           "numeric_recover_below": "Optional. Keep the incident active until strictly below this value. Must be at most the problem-above threshold.",
-          "numeric_unit": "Exact unit attribute, for example %, °C, or °F. A missing or different unit suspends evaluation. Empty accepts the source's current units."
+          "numeric_unit": "Exact unit attribute, for example %, °C, or °F. A missing or different unit suspends evaluation. Empty accepts the source's current units.",
+          "entity_id": "Required for alerts. Profiles only contain shared notification destinations and device outputs; they do not monitor a source."
         }
       },
       "timing": {
@@ -219,7 +265,8 @@
           "enable_snooze": "Allow temporary snooze",
           "snooze_minutes": "Default snooze duration (minutes)",
           "action_buttons": "Add Companion phone controls",
-          "resolution_after_ack": "Send resolution notification after acknowledgement"
+          "resolution_after_ack": "Send resolution notification after acknowledgement",
+          "configure_delivery": "Configure escalation, delivery rules, and history"
         },
         "data_description": {
           "intervals": "One row gives a fixed interval. For example, 15, 30, 60 uses those delays in sequence, then repeats every 60 minutes. Minimum 0.016 minutes.",
@@ -232,7 +279,8 @@
           "enable_snooze": "Allow the Snooze button and action. Snooze is separate from acknowledgement; reminders continue advancing silently.",
           "snooze_minutes": "Used by the device and phone buttons, and by the snooze action when no duration is supplied. Maximum one week.",
           "action_buttons": "Add incident-specific Acknowledge, Snooze, and Open alert controls to direct mobile_app notify actions. Test and resolution messages have no generated controls. Automatic controls replace any actions in extra data for these destinations.",
-          "resolution_after_ack": "Off suppresses resolution messages and recovery outputs when the incident is acknowledged. Cleanup still runs. Snooze does not suppress resolution."
+          "resolution_after_ack": "Off suppresses resolution messages and recovery outputs when the incident is acknowledged. Cleanup still runs. Snooze does not suppress resolution.",
+          "configure_delivery": "Open advanced delivery settings after Content. Leaving this off preserves existing settings."
         }
       },
       "notifications": {
@@ -241,12 +289,14 @@
         "data": {
           "notifiers": "Legacy notify actions",
           "notify_entities": "Notify entities",
-          "configure_outputs": "Add or edit light, siren, speaker, and custom outputs"
+          "configure_outputs": "Add or edit light, siren, speaker, and custom outputs",
+          "profile_ids": "Reusable profiles"
         },
         "data_description": {
           "notifiers": "Choose an action such as mobile_app_my_phone or persistent_notification. You can also enter a missing action name. Use a notify group for provider-specific top-level targets.",
           "notify_entities": "Uses notify.send_message. Home Assistant 2026.9.2 supports message and title only for these targets. Use a legacy action if you need extra data, tags, or action buttons.",
-          "configure_outputs": "Open the output editor next. Leaving this off preserves existing outputs. Phone destinations may be empty when using device outputs."
+          "configure_outputs": "Open the output editor next. Leaving this off preserves existing outputs. Phone destinations may be empty when using device outputs.",
+          "profile_ids": "Add shared destinations and outputs. Profile edits apply to every referencing alert at subsequent delivery opportunities. Unavailable profiles are reported on the status sensor."
         }
       },
       "messages": {
@@ -267,7 +317,7 @@
       },
       "review": {
         "title": "Review alert",
-        "description": "**{name}**\n\nWatch `{entity}` for `{state}`. Current source state and unit: `{current}`. Recovery: {recovery}.\n\nFirst notification after activation: {first}. Repeat delays in minutes: {schedule}; the final delay repeats indefinitely.\n\n{reliability}\n\nDestinations: {destinations}\n\nResolution: {completion}\n\nSubmit to save. No test notification is sent automatically. Startup evaluation or restored overdue reminders may send a real alert. Use the Test notification button on the alert device to test explicitly."
+        "description": "**{name}**\n\nWatch `{entity}` for `{state}`. Current source state and unit: `{current}`. Recovery: {recovery}.\n\nFirst notification after activation: {first}. Repeat delays in minutes: {schedule}; the final delay repeats indefinitely.\n\n{reliability}\n\nDestinations: {destinations}\n\nResolution: {completion}\n\n{delivery_summary}\n\nSubmit to save. No test notification is sent automatically. Startup evaluation or restored overdue reminders may send a real alert. Use the Test notification button on the alert device to test explicitly."
       },
       "outputs": {
         "title": "Alert outputs",
@@ -321,7 +371,11 @@
           "media_type": "Media content type",
           "actions": "Alert actions",
           "stop_actions": "Stop / cleanup actions",
-          "recovery_actions": "Recovery actions"
+          "recovery_actions": "Recovery actions",
+          "quiet_start": "Quiet hours start",
+          "quiet_end": "Quiet hours end",
+          "presence_entities": "People or occupancy entities",
+          "presence_mode": "Allow delivery when"
         },
         "data_description": {
           "repeat": "Off runs once per incident at its first notification opportunity. On follows the reminder schedule. An already-running effect is not duplicated.",
@@ -339,8 +393,42 @@
           "media_type": "Defaults to music. Override if your player requires another content type.",
           "actions": "Use the native action editor; no separate automation is needed. Variables: alert_name, entity_id (watched source), incident_id, and message.",
           "stop_actions": "Explicit cleanup for anything the custom actions leave enabled. Runs on duration expiry, acknowledgement, snooze, suspension, resolution, edits, or unload. Cleanup has a 10-second budget. These actions also run after an individual test.",
-          "recovery_actions": "Optional separate sequence for resolution after an earlier notification attempt. Use self-contained actions; recovery sequences do not run the stop sequence afterward."
+          "recovery_actions": "Optional separate sequence for resolution after an earlier notification attempt. Use self-contained actions; recovery sequences do not run the stop sequence afterward.",
+          "quiet_start": "Optional daily quiet period in Home Assistant’s configured timezone. Both times are required. Overnight periods and daylight-saving changes follow the local clock.",
+          "quiet_end": "Held alert delivery resumes within one minute after quiet hours, if the incident is still active and not acknowledged or snoozed. Recovery messages are skipped during quiet hours.",
+          "presence_entities": "Optional. Person/device tracker home or binary/input boolean on means present. Leave empty to ignore presence. Unknown/missing states never prove everyone is away.",
+          "presence_mode": "Any present: allow when at least one selected entity is home/on. Everyone away: allow only when all selected entities are known and neither home nor on."
         }
+      },
+      "delivery": {
+        "title": "Escalation and delivery rules",
+        "description": "Quiet hours and presence below apply to phone/notify destinations. Device outputs have their own rules. Escalation keeps the original destinations and adds each reached stage. Outputs assigned to a stage wait until that stage. Unassigned outputs are available from the start.",
+        "data": {
+          "quiet_start": "Quiet hours start",
+          "quiet_end": "Quiet hours end",
+          "presence_entities": "People or occupancy entities",
+          "presence_mode": "Allow delivery when",
+          "group": "Notification group (optional)",
+          "group_window": "Grouping window (seconds)",
+          "rate_limit": "Minimum time between notifications (minutes)",
+          "history_limit": "Recent history entries to retain",
+          "stages": "Escalation stages"
+        },
+        "data_description": {
+          "quiet_start": "Optional daily quiet period in Home Assistant’s configured timezone. Both times are required. Overnight periods and daylight-saving changes follow the local clock.",
+          "quiet_end": "Held alert delivery resumes within one minute after quiet hours, if the incident is still active and not acknowledged or snoozed. Recovery messages are skipped during quiet hours.",
+          "presence_entities": "Optional. Person/device tracker home or binary/input boolean on means present. Leave empty to ignore presence. Unknown/missing states never prove everyone is away.",
+          "presence_mode": "Any present: allow when at least one selected entity is home/on. Everyone away: allow only when all selected entities are known and neither home nor on.",
+          "group": "Alerts with the same group, destination list, title, and provider data share a summary. Blank keeps alerts separate. Multi-alert summaries omit generated phone controls; use the alert device to acknowledge each incident. Single-alert deliveries retain phone controls. Grouping applies to alert notifications only.",
+          "group_window": "Collect alert notifications for 1–300 seconds when a group is set. A new reminder replaces that alert’s pending message without postponing the existing group deadline.",
+          "rate_limit": "Zero disables throttling. Otherwise coalesce reminders until this minimum interval has elapsed. Limits are shared by matching group/destination settings, and reset on Home Assistant restart.",
+          "history_limit": "0 disables history; otherwise keep up to 100 metadata entries. Default 50. History contains lifecycle/output events and error categories, not messages. Enable incident restoration to keep history across reloads.",
+          "stages": "Add up to 10 stages with distinct elapsed-minute thresholds. Later recipients and outputs accumulate. Optional interval replaces the reminder cadence from that stage. Acknowledge stops escalation; snooze silences delivery without resetting incident age. After downtime, at most one catch-up delivery uses the latest reached stage."
+        }
+      },
+      "profile_review": {
+        "title": "Review reusable profile",
+        "description": "**{name}**\n\nNotification destinations: {destinations}\n\nDevice outputs: {outputs}\n\nSave this profile, then select it in the Destinations step of one or more alerts. It has no watched entity and sends nothing on its own. Editing it affects all referencing alerts."
       }
     },
     "error": {
@@ -353,7 +441,7 @@
       "entity_data_unsupported": "Notify entities do not accept extra data in Home Assistant 2026.9.2. Clear this field, or choose only legacy notify actions.",
       "invalid_boolean": "Select an on/off value.",
       "invalid_duration": "Enter a finite nonnegative delay that fits a valid date. Snooze must be greater than zero and at most 10080 minutes.",
-      "invalid_policy": "Select Resolve or Suspend.",
+      "invalid_policy": "Check both quiet-hour times, presence settings, stage thresholds, destination names, and finite values within the displayed limits. Stage thresholds must be distinct and greater than zero.",
       "invalid_number": "Enter a finite number.",
       "incompatible_thresholds": "Choose one problem threshold and its corresponding recovery threshold. Recovery must be at or beyond the problem threshold in the recovery direction.",
       "invalid_output": "Check the output settings: choose valid entities, a name, finite values within the displayed limits, and any required provider or audio fields.",
@@ -457,6 +545,10 @@
     "stop_outputs": {
       "name": "Stop outputs",
       "description": "Stop running effects and individual tests, including cleanup. Does not acknowledge the incident; repeated outputs may run at the next reminder."
+    },
+    "clear_history": {
+      "name": "Clear incident history",
+      "description": "Delete this alert’s recent metadata history without changing the active incident or notification schedule."
     }
   },
   "selector": {
@@ -473,6 +565,18 @@
       "options": {
         "blink": "Blink",
         "steady": "Steady"
+      }
+    },
+    "presence_mode": {
+      "options": {
+        "any_home": "At least one person or room is present",
+        "all_away": "Everyone / all rooms are away"
+      }
+    },
+    "entry_kind": {
+      "options": {
+        "alert": "Alert",
+        "profile": "Reusable output profile"
       }
     }
   }

@@ -246,3 +246,90 @@ async def test_output_http_create_edit_test_and_remove(
     assert response.status == 200
     await settle(hass)
     assert not runtime.outputs._tasks
+
+
+async def test_profiles_and_delivery_policy_http_workflow(
+    hass, hass_client, notifications
+):
+    from test_outputs import settle
+
+    assert await async_setup_component(hass, "http", {})
+    config_entries.async_setup(hass)
+    client = await hass_client()
+
+    async def start():
+        response = await client.post(
+            "/api/config/config_entries/flow", json={"handler": DOMAIN}
+        )
+        assert response.status == 200
+        return await response.json()
+
+    async def submit(result, values):
+        response = await client.post(
+            f"/api/config/config_entries/flow/{result['flow_id']}", json=values
+        )
+        assert response.status == 200, await response.text()
+        result = await response.json()
+        assert not result.get("errors"), result
+        return result
+
+    result = await start()
+    result = await submit(result, {"name": "Household", "kind": "profile"})
+    assert result["step_id"] == "notifications"
+    result = await submit(result, {"notifiers": ["phone"]})
+    assert result["step_id"] == "profile_review"
+    result = await submit(result, {})
+    await settle(hass)
+    profile = next(
+        entry
+        for entry in hass.config_entries.async_entries(DOMAIN)
+        if entry.data["kind"] == "profile"
+    )
+    assert profile.runtime_data._stopped
+
+    result = await start()
+    result = await submit(result, {"name": "Door", "entity_id": "binary_sensor.garage"})
+    result = await submit(
+        result, {"intervals": [{"minutes": 30}], "configure_delivery": True}
+    )
+    profile_field = next(
+        field for field in result["data_schema"] if field["name"] == "profile_ids"
+    )
+    assert (
+        profile_field["selector"]["select"]["options"][0]["value"] == profile.entry_id
+    )
+    result = await submit(result, {"profile_ids": [profile.entry_id]})
+    result = await submit(result, {"done_message": "Closed"})
+    assert result["step_id"] == "delivery"
+    result = await submit(
+        result,
+        {
+            "quiet_start": "22:00:00",
+            "quiet_end": "07:00:00",
+            "presence_entities": ["person.dan"],
+            "group": "doors",
+            "group_window": 15,
+            "rate_limit": 5,
+            "history_limit": 25,
+            "stages": [
+                {"name": "Urgent", "after": 5, "interval": 2, "notifiers": ["phone"]}
+            ],
+        },
+    )
+    assert result["step_id"] == "review"
+    result = await submit(result, {})
+    await settle(hass)
+    entry = next(
+        entry
+        for entry in hass.config_entries.async_entries(DOMAIN)
+        if entry.data["kind"] == "alert"
+    )
+    assert entry.runtime_data.config.stages[0]["after"] == 5
+    assert entry.runtime_data.config.delivery["group"] == "doors"
+    assert entry.runtime_data.config.history_limit == 25
+    assert entry.runtime_data.effective_config.notifiers == ("phone",)
+    for current in (entry, profile):
+        response = await client.delete(
+            f"/api/config/config_entries/entry/{current.entry_id}"
+        )
+        assert response.status == 200

@@ -10,6 +10,7 @@ from homeassistant.helpers import selector
 from homeassistant.helpers.script import async_validate_actions_config
 
 from .output_config import OUTPUT_TYPES, InvalidOutput, validate_output
+from .policy_flow import POLICY_FIELDS, routing_fields
 
 
 def number(minimum, maximum, unit=None):
@@ -103,10 +104,15 @@ class OutputFlowSteps:
         draft = self._output_draft
         kind = draft["type"]
         errors = {}
-        values = draft
+        values = {**draft, **draft.get("delivery", {})}
         if user_input is not None:
             # Optional fields omitted on edit are intentionally cleared.
             values = {"id": draft["id"], "type": kind, **user_input}
+            values["delivery"] = {
+                key: user_input[key] for key in POLICY_FIELDS if key in user_input
+            }
+            for key in POLICY_FIELDS:
+                values.pop(key, None)
             try:
                 output = validate_output(values, self.hass)
                 if kind == "custom":
@@ -193,6 +199,7 @@ class OutputFlowSteps:
                     vol.Optional("recovery_actions"): selector.ActionSelector(),
                 }
             )
+        fields.update(routing_fields())
         return self.async_show_form(
             step_id="output_settings",
             data_schema=self._schema(

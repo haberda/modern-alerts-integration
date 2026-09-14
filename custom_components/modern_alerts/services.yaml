@@ -84,3 +84,10 @@ stop_outputs:
     entity:
       integration: modern_alerts
       domain: sensor
+clear_history:
+  name: Clear incident history
+  description: Delete recent metadata history without changing the incident or reminder schedule.
+  target:
+    entity:
+      integration: modern_alerts
+      domain: sensor
