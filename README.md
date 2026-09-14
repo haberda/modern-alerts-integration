@@ -2,11 +2,11 @@
 
 A custom Home Assistant integration that reproduces the built-in Alert lifecycle with setup and editing through **Settings → Devices & services**. Each alert has a status sensor, a problem binary sensor, and buttons to acknowledge, snooze, resume, and test notifications.
 
-**Version 0.4.0 targets Home Assistant 2026.9.2 (Python 3.14).** The test suite runs against that exact release. Earlier versions are not supported; newer releases require compatibility testing. This integration uses its own `modern_alerts` actions and standard entities, so existing `alert.*` references need migration.
+**Version 0.5.0 targets Home Assistant 2026.9.2 (Python 3.14).** The test suite runs against that exact release. Earlier versions are not supported; newer releases require compatibility testing. This integration uses its own `modern_alerts` actions and standard entities, so existing `alert.*` references need migration.
 
 ## Install
 
-1. Copy the repository's **`custom_components/modern_alerts` directory**, including its translations, into your Home Assistant configuration directory:
+1. Copy the repository's **`custom_components/modern_alerts` directory**, including its translations and frontend directory, into your Home Assistant configuration directory:
 
    ```text
    <config>/custom_components/modern_alerts/__init__.py
@@ -24,7 +24,7 @@ This is a custom integration, not an automation blueprint. After installation, c
 
 The setup wizard walks through five main steps, with optional output and delivery editors:
 
-1. **Condition:** name, source entity, and the exact problem state. Use `on` for a typical door binary sensor. Match the underlying state string, not a translated label such as “Open.” For numeric alerts, enter one problem threshold and an optional recovery threshold; the exact state field is then ignored. An optional expected unit protects against changes in source units. Use a Template binary sensor helper for compound conditions.
+1. **Condition:** name, source entity, and the exact problem state. Use `on` for a typical door binary sensor. Match the underlying state string, not a translated label such as “Open.” For numeric alerts, enter one problem threshold and an optional recovery threshold; the exact state field is then ignored. An optional expected unit protects against changes in source units. Alternatively, add compound rules and choose All (AND) or Any (OR); these replace single-source matching.
 2. **Timing:** add one interval for fixed repetition or several intervals in order. Values are minutes and may be fractional (minimum `0.016`). The final interval repeats indefinitely. Choose whether to delay the first notification and whether acknowledgement is allowed. Set sustained activation/recovery delays, startup/restoration policy, unavailable-source policy, snooze defaults, and Companion phone controls here.
 3. **Destinations:** choose legacy notify actions, notify entities, or leave both lists empty for a state-only alert. Missing legacy action names can be entered manually. Enable **Add or edit light, siren, speaker, and custom outputs** to configure device effects before continuing to Content.
 4. **Content:** optional message, title, resolution message, and provider data. Text fields support Home Assistant templates. An empty message uses the alert name; an empty resolution message disables completion notifications. The alert name is literal text. Extra data is an optional YAML mapping entered within the UI and is forwarded unchanged.
@@ -56,6 +56,39 @@ Acknowledge does not disable monitoring. When the source clears, the incident en
 Use the configuration entry's **Configure/options** control to edit every setting. Name, timing, destination, and message edits retain acknowledgement when the watched entity and condition (including numeric thresholds and expected unit) stay the same. Saving changed options cancels pending delivery work. Message, destination, and name edits preserve the existing deadline. Changing repeat intervals restarts the interval sequence from save time. Changing debounce delays restarts any pending transition. Ordinary edits send no extra immediate reminder for an unchanged active condition. Editing escalation stages re-evaluates their thresholds against the current incident age and can send a newly due stage immediately. Changing the condition starts fresh without sending a resolution message for the replaced condition. Entity IDs remain stable when the alert is renamed.
 
 Disabling the configuration entry stops the alert entirely. Deleting its entry removes its entities and listeners. Neither operation sends a resolution notification. These operations are different from acknowledgement.
+
+## Overview and delivery preview
+
+Open **Modern Alerts** in the sidebar. It refreshes every five seconds and supports name search and filters for active, acknowledged, snoozed, suspended, idle, and errored alerts. Each alert shows incident start, current stage, pending transitions, next repeat opportunity, recent history, and permitted acknowledgement/snooze controls. Administrators can also see entries that failed to load. The sidebar is registered while alerts are loaded and removed when the last loaded alert unloads.
+
+**Explain delivery** shows current notification destinations and separate blockers for notifications and each device output: acknowledgement, snooze, unavailable sources, daily quiet hours, weekly windows, presence, escalation, once-per-incident outputs, or buffered group/rate delays. It reports repeat/escalation opportunities and the current buffered notification deadline. These are scheduling opportunities, not guaranteed delivery times; future conditions and policies can change. A grouped message may contain other alerts at dispatch.
+
+Administrators also get a read-only preview of the current message, title, and resolution templates. Previewing never calls notification/device actions, acknowledges an incident, changes deadlines, or appends history. Resolution text is a template preview, not a prediction that a resolution message will be sent. Payload data and device action templates are not rendered in this preview. Non-administrators can only see alerts whose status entities they can read; control actions use Home Assistant's normal entity permissions.
+
+## Duplicate or import
+
+In **Add integration → Modern Alerts**, choose **Duplicate an existing entry** or **Import legacy Alert YAML** in the draft-source selector, then continue. Leave the other fields empty for that first step.
+
+- **Duplicate:** choose an alert or profile. Its current configuration (including options, profile references, stages, outputs, and schedules) becomes a new draft with “copy” added to the name. Review and edit the normal wizard before saving. Incident state, acknowledgement, snooze, history, and registered identity are not copied. Changes to a copy do not edit the original; shared profile references remain shared.
+- **Import:** paste a single legacy definition, a mapping of named alerts, or the `alert:` section. Choose one definition and review it through the normal wizard. Templates and notification data are retained without rendering. Imports support the built-in Alert schema, including scalar/list repeat intervals and `can_acknowledge`. One alert is created per workflow. Limits are 64 KiB and 100 definitions per paste; YAML aliases, file includes, secret tags, non-JSON values, and unsupported fields are rejected.
+
+Drafts create nothing until the final review. Disable the corresponding legacy alert before saving its replacement to avoid duplicate reminders. The importer does not edit configuration files, disable existing alerts, or redirect old `alert.*` entity/action references. Startup evaluation remains off unless enabled during review.
+
+## Compound conditions
+
+The condition form accepts up to 20 state-equals, state-not-equals, above, or below comparisons. Choose **All rules (AND)** or **Any rule (OR)**. Above/below comparisons are strict, use raw source values, and have no unit conversion or per-rule hysteresis. Existing single-source numeric hysteresis remains available when the compound list is empty. For nested logic or more elaborate expressions, use a Template binary sensor helper.
+
+Every rule entity is watched. Activation/recovery debounce applies to the combined result. Missing, unknown, unavailable, or nonnumeric inputs are uncertain. Known false inputs decide an AND group; known true inputs decide an OR group. If the result is still uncertain, the unavailable-source policy resolves or suspends the incident. Restored incidents wait for a decidable result. Ordinary acknowledgement, snooze, escalation, and persistence apply to the combined condition.
+
+The primary source is retained for existing output template variables; when omitted it defaults to the first rule's entity. Compound rules replace the primary source condition. Clearing the rules returns to single-source matching. Changing rules or AND/OR mode resets the incident and rebinds watched entities.
+
+## Weekly delivery windows
+
+The delivery editor and each device output editor accept **Weekly delivery windows**. Add weekdays, start, and end times; use separate rows for weekday/weekend schedules. Empty means unrestricted weekly availability. Configured windows are combined with OR; daily quiet hours and presence requirements must also permit delivery.
+
+Windows use Home Assistant's local timezone, include the start, and exclude the end. An overnight window belongs to its starting weekday: Monday 22:00–02:00 includes Tuesday before 02:00. Equal start/end is rejected; to allow a full day use adjacent windows. Overlaps are allowed. There are at most 28 windows per policy. Daylight-saving transitions follow local wall-clock time: repeated times match both occurrences, and skipped times do not occur.
+
+Schedules gate delivery, not condition monitoring, incident age, or cleanup. Notification and output schedules are independent. An eligible held delivery can resume when its window opens; a running output is stopped when its policy closes. Time changes are checked within one minute. Resolution deliveries blocked by policy are dropped rather than queued, matching daily quiet-hour behavior. Explicit notification/output tests bypass delivery policies.
 
 ## Notification compatibility
 
@@ -194,6 +227,8 @@ python -m venv .venv
 ```
 
 The pinned test fixture package installs Home Assistant 2026.9.2. Tests cover lifecycle behavior, notification adapters, validation, real config/options managers, registry entities, action targeting, deletion/reload, restored deadlines, debounce cancellation, hysteresis/unit checks, snooze, stale phone actions, output cleanup, shared-device ownership, real light service handling, custom-action cancellation, slow-provider races, and creation/edit/deletion through the authenticated HTTP endpoints used by the UI. External notification delivery is mocked; the HTTP workflow test uses a local test server. These checks do not substitute for rendering the forms in an installed frontend or testing delivery on a real phone.
+
+The optional browser smoke test uses an installed Firefox with its built-in WebDriver BiDi server; it is skipped when Firefox is unavailable. The Python/HTTP/WebSocket tests use the exact frontend package pinned in `requirements-test.txt`.
 
 Before using on your installation, create an alert watching an Input boolean helper with a short interval, test immediate and delayed notifications, acknowledge/resume it, clear it, and edit/delete it through Devices & services. Verify the intended behavior with your actual notification provider.
 
