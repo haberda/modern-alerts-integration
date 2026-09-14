@@ -18,7 +18,23 @@ A custom Home Assistant integration that reproduces the built-in Alert lifecycle
 3. Set up your notification provider if you want notifications. State-only alerts are also supported.
 4. Open **Settings → Devices & services → Add integration → Modern Alerts**.
 
-This is a custom integration, not an automation blueprint. After installation, creating and editing alerts requires no configuration-file changes. No HACS listing or automatic installation is assumed.
+This is a custom integration, not an automation blueprint. After installation, creating and editing alerts requires no configuration-file changes. HACS installation is supported from a public GitHub copy of this repository; see below.
+
+## Install with HACS
+
+HACS requires a **public GitHub repository**. The current `git.haber.haus` remote cannot be added directly. Publish or mirror this repository to GitHub, then:
+
+1. Open **HACS → ⋮ → Custom repositories**.
+2. Enter the public GitHub repository URL and choose **Integration**.
+3. Find **Modern Alerts** in HACS and download it.
+4. Restart Home Assistant.
+5. Open **Settings → Devices & services → Add integration → Modern Alerts**.
+
+Home Assistant **2026.9.2 or newer** is required by the HACS metadata; compatibility is tested against 2026.9.2. HACS downloads `custom_components/modern_alerts`, including its frontend and translations. No separate dashboard resource or release ZIP is needed. Existing manual installations can use the same integration directory and domain when adopting HACS.
+
+For maintainers: `hacs.json` uses the README as the HACS description. The integration manifest identifies `@haberda` as code owner and retains the current documentation and issue-tracker host. Update those links if support moves to GitHub. Add a repository description and relevant topics (for example, `home-assistant`, `hacs`, and `alerts`) on the GitHub repository. `.github/workflows/hacs.yml` runs official HACS validation on pushes, pull requests, published releases, manual requests, and weekly; it needs no custom token and does not post PR comments. Remote validation cannot run against the self-hosted origin. HACS also documents Home Assistant Brands registration as a publishing requirement; add `modern_alerts` there before expecting all publishing checks to pass. These repository files do not create that registration or a default-store listing.
+
+For versioned downloads, publish a GitHub release with a tag matching the integration manifest version (currently `0.5.0`). HACS can otherwise install the default branch. See the [HACS publishing requirements](https://hacs.dev/docs/publish/start/) and [integration requirements](https://hacs.dev/docs/publish/integration/).
 
 ## Create an alert
 
