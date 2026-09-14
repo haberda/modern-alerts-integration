@@ -214,3 +214,89 @@ async def test_invalid_hysteresis_has_field_error(hass):
     )
     assert result["errors"] == {"numeric_recover_above": "incompatible_thresholds"}
     assert_form(result, "user")
+
+
+async def test_output_editor_all_types_and_remove(hass):
+    manager = hass.config_entries.flow
+    result = await begin(hass)
+    result = await configure(
+        manager, result, {"name": "Garage", "entity_id": "binary_sensor.garage"}
+    )
+    result = await configure(manager, result, {"intervals": [{"minutes": 1}]})
+    result = await configure(manager, result, {"configure_outputs": True})
+    assert result["step_id"] == "outputs"
+    settings = {
+        "light": {"entities": ["light.hall"], "color": [255, 0, 0], "pattern": "blink"},
+        "siren": {"entities": ["siren.hall"], "tone": "alarm"},
+        "tts": {
+            "entities": ["media_player.hall"],
+            "tts_entity": "tts.local",
+            "message": "{{ alert_name }}",
+        },
+        "audio": {
+            "entities": ["media_player.hall"],
+            "media_url": "media-source://media_source/local/chime.mp3",
+        },
+        "custom": {
+            "actions": [{"event": "alert_test"}],
+            "stop_actions": [{"event": "alert_stop"}],
+        },
+    }
+    for kind, values in settings.items():
+        result = await configure(manager, result, {"next_step_id": "output_add"})
+        result = await configure(manager, result, {"type": kind})
+        assert_form(result, "output_settings")
+        result = await configure(
+            manager, result, {"name": kind, "duration": 5, **values}
+        )
+        assert result["step_id"] == "outputs"
+    result = await configure(manager, result, {"next_step_id": "output_edit"})
+    assert_form(result, "output_edit")
+    serialized = to_field_list(
+        result["data_schema"], custom_serializer=cv.custom_serializer
+    )
+    first_id = serialized[0]["selector"]["select"]["options"][0]["value"]
+    result = await configure(manager, result, {"output_id": first_id})
+    result = await configure(
+        manager,
+        result,
+        {
+            "name": "Renamed light",
+            "entities": ["light.hall"],
+            "pattern": "steady",
+            "duration": 2,
+        },
+    )
+    assert result["step_id"] == "outputs"
+    result = await configure(manager, result, {"next_step_id": "output_remove"})
+    result = await configure(manager, result, {"output_id": first_id})
+    result = await configure(manager, result, {"next_step_id": "messages"})
+    result = await configure(manager, result, {})
+    assert_form(result, "review")
+    with patch("custom_components.modern_alerts.async_setup_entry", return_value=True):
+        result = await configure(manager, result, {})
+        await hass.async_block_till_done()
+    assert len(result["data"]["outputs"]) == 4
+    assert {item["type"] for item in result["data"]["outputs"]} == {
+        "siren",
+        "tts",
+        "audio",
+        "custom",
+    }
+
+
+async def test_output_editor_validation(hass):
+    manager = hass.config_entries.flow
+    result = await begin(hass)
+    result = await configure(
+        manager, result, {"name": "Garage", "entity_id": "binary_sensor.garage"}
+    )
+    result = await configure(manager, result, {"intervals": [{"minutes": 1}]})
+    result = await configure(manager, result, {"configure_outputs": True})
+    result = await configure(manager, result, {"next_step_id": "output_add"})
+    result = await configure(manager, result, {"type": "custom"})
+    result = await configure(
+        manager, result, {"name": "Custom", "actions": [{"nonsense": "bad"}]}
+    )
+    assert result["errors"] == {"actions": "invalid_actions"}
+    assert_form(result, "output_settings")

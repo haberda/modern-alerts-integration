@@ -9,9 +9,10 @@ from homeassistant.helpers import selector
 
 from .const import DOMAIN, MIN_REPEAT
 from .models import AlertConfig, InvalidConfig
+from .output_flow import OutputFlowSteps
 
 
-class AlertFlowSteps:
+class AlertFlowSteps(OutputFlowSteps):
     """Shared create/edit forms; every field can be edited without YAML files."""
 
     _values: dict[str, Any]
@@ -147,6 +148,7 @@ class AlertFlowSteps:
         values = {
             "notifiers": self._values.get("notifiers", []),
             "notify_entities": self._values.get("notify_entities", []),
+            "configure_outputs": bool(self._values.get("outputs")),
         }
         if user_input is not None:
             # An omitted optional list means clear it, including during editing.
@@ -162,6 +164,8 @@ class AlertFlowSteps:
                     notifiers=list(config.notifiers),
                     notify_entities=list(config.notify_entities),
                 )
+                if user_input.get("configure_outputs"):
+                    return await self.async_step_outputs()
                 return await self.async_step_messages()
         services = self.hass.services.async_services().get("notify", {})
         choices = sorted(
@@ -179,6 +183,9 @@ class AlertFlowSteps:
             vol.Optional("notify_entities"): selector.EntitySelector(
                 {"filter": {"domain": "notify"}, "multiple": True}
             ),
+            vol.Required(
+                "configure_outputs", default=False
+            ): selector.BooleanSelector(),
         }
         return self.async_show_form(
             step_id="notifications",
@@ -229,6 +236,7 @@ class AlertFlowSteps:
         targets = [f"notify.{n}" for n in config.notifiers] + list(
             config.notify_entities
         )
+        targets.extend(f"{item['name']} ({item['type']})" for item in config.outputs)
         return self.async_show_form(
             step_id="review",
             data_schema=vol.Schema({}),

@@ -63,3 +63,24 @@ cancel_snooze:
     entity:
       integration: modern_alerts
       domain: sensor
+test_output:
+  name: Test selected output
+  description: Start one bounded output without creating an incident or sending phone notifications. Inspect output_errors for failures.
+  fields:
+    output_id:
+      name: Output ID
+      description: Optional ID from the status sensor configured_outputs attribute. Omit to use the Output to test selector.
+      required: false
+      selector:
+        text:
+  target:
+    entity:
+      integration: modern_alerts
+      domain: sensor
+stop_outputs:
+  name: Stop outputs
+  description: Stop running effects and individual tests with cleanup. Does not acknowledge; repeated outputs may run at the next reminder.
+  target:
+    entity:
+      integration: modern_alerts
+      domain: sensor

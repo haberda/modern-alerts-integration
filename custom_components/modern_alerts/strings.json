@@ -58,11 +58,13 @@
         "description": "Select any number of destinations, or leave both lists empty for status only. Set up notification providers first. A missing destination is reported at dispatch and retried at the next reminder.",
         "data": {
           "notifiers": "Legacy notify actions",
-          "notify_entities": "Notify entities"
+          "notify_entities": "Notify entities",
+          "configure_outputs": "Add or edit light, siren, speaker, and custom outputs"
         },
         "data_description": {
           "notifiers": "Choose an action such as mobile_app_my_phone or persistent_notification. You can also enter a missing action name. Use a notify group for provider-specific top-level targets.",
-          "notify_entities": "Uses notify.send_message. Home Assistant 2026.9.2 supports message and title only for these targets. Use a legacy action if you need extra data, tags, or action buttons."
+          "notify_entities": "Uses notify.send_message. Home Assistant 2026.9.2 supports message and title only for these targets. Use a legacy action if you need extra data, tags, or action buttons.",
+          "configure_outputs": "Open the output editor next. Leaving this off preserves existing outputs. Phone destinations may be empty when using device outputs."
         }
       },
       "messages": {
@@ -84,6 +86,79 @@
       "review": {
         "title": "Review alert",
         "description": "**{name}**\n\nWatch `{entity}` for `{state}`. Current source state and unit: `{current}`. Recovery: {recovery}.\n\nFirst notification after activation: {first}. Repeat delays in minutes: {schedule}; the final delay repeats indefinitely.\n\n{reliability}\n\nDestinations: {destinations}\n\nResolution: {completion}\n\nSubmit to save. No test notification is sent automatically. Startup evaluation or restored overdue reminders may send a real alert. Use the Test notification button on the alert device to test explicitly."
+      },
+      "outputs": {
+        "title": "Alert outputs",
+        "description": "Configured outputs: {outputs}\n\nCombine outputs with phone notifications or use them on their own. Save the alert before testing an individual output from its device page.",
+        "menu_options": {
+          "output_add": "Add output",
+          "output_edit": "Edit output",
+          "output_remove": "Remove output",
+          "messages": "Continue to notification content"
+        }
+      },
+      "output_add": {
+        "title": "Add output",
+        "data": {
+          "type": "Output type"
+        }
+      },
+      "output_edit": {
+        "title": "Edit output",
+        "data": {
+          "output_id": "Output"
+        }
+      },
+      "output_remove": {
+        "title": "Remove output",
+        "description": "This removal takes effect when you finish and save the alert.",
+        "data": {
+          "output_id": "Output to remove"
+        }
+      },
+      "output_settings": {
+        "title": "Configure output",
+        "description": "Output type: {type}. Acknowledge and Snooze cancel running effects. Set the desired duration and cleanup behavior here.",
+        "data": {
+          "name": "Output name",
+          "repeat": "Run at every reminder",
+          "duration": "Maximum effect duration (seconds)",
+          "entities": "Devices to alert through",
+          "pattern": "Light pattern",
+          "interval": "Time between light changes (seconds)",
+          "color": "Light color",
+          "brightness": "Light brightness (%)",
+          "restore": "Restore previous light state or speaker volume",
+          "volume": "Volume (0–1)",
+          "tone": "Siren tone",
+          "tts_entity": "Text-to-speech provider",
+          "message": "Spoken alert message",
+          "recovery_message": "Spoken recovery message",
+          "language": "Language",
+          "media_url": "Audio URL or media-source URI",
+          "media_type": "Media content type",
+          "actions": "Alert actions",
+          "stop_actions": "Stop / cleanup actions",
+          "recovery_actions": "Recovery actions"
+        },
+        "data_description": {
+          "repeat": "Off runs once per incident at its first notification opportunity. On follows the reminder schedule. An already-running effect is not duplicated.",
+          "duration": "0.1–300 seconds. Light and siren effects stop at this deadline. Speaker playback is stopped at this limit and may be cut short. Custom actions are time-limited and then run cleanup.",
+          "entities": "Choose up to 20 entities. An unavailable or busy device is reported independently; other outputs still run.",
+          "pattern": "Blink alternates on and off. Steady holds the selected light state for the duration.",
+          "interval": "Used for Blink. Minimum 0.5 seconds; this is separate from the alert reminder interval.",
+          "restore": "Restore lights or speaker volume on completion or cancellation, unless an external change was observed. Playback of previous media cannot be restored generically. With this off, lights are turned off and the chosen speaker volume is retained.",
+          "volume": "Optional. Leave empty to retain the current volume. Supported settings depend on the device.",
+          "tone": "Optional. Enter a tone supported by the selected sirens.",
+          "message": "Optional. Defaults to the alert message. Templates can use alert_name, entity_id, incident_id, and message.",
+          "recovery_message": "Optional. Spoken only when an incident with an earlier notification attempt resolves. Not sent on acknowledgement or snooze.",
+          "language": "Optional language code supported by the selected TTS provider.",
+          "media_url": "An audio URL reachable by the speaker, or a Home Assistant media-source URI.",
+          "media_type": "Defaults to music. Override if your player requires another content type.",
+          "actions": "Use the native action editor; no separate automation is needed. Variables: alert_name, entity_id (watched source), incident_id, and message.",
+          "stop_actions": "Explicit cleanup for anything the custom actions leave enabled. Runs on duration expiry, acknowledgement, snooze, suspension, resolution, edits, or unload. Cleanup has a 10-second budget. These actions also run after an individual test.",
+          "recovery_actions": "Optional separate sequence for resolution after an earlier notification attempt. Use self-contained actions; recovery sequences do not run the stop sequence afterward."
+        }
       }
     },
     "error": {
@@ -98,7 +173,9 @@
       "invalid_duration": "Enter a finite nonnegative delay that fits a valid date. Snooze must be greater than zero and at most 10080 minutes.",
       "invalid_policy": "Select Resolve or Suspend.",
       "invalid_number": "Enter a finite number.",
-      "incompatible_thresholds": "Choose one problem threshold and its corresponding recovery threshold. Recovery must be at or beyond the problem threshold in the recovery direction."
+      "incompatible_thresholds": "Choose one problem threshold and its corresponding recovery threshold. Recovery must be at or beyond the problem threshold in the recovery direction.",
+      "invalid_output": "Check the output settings: choose valid entities, a name, finite values within the displayed limits, and any required provider or audio fields.",
+      "invalid_actions": "Enter a valid Home Assistant action sequence. Check device actions, templates, and required fields."
     }
   },
   "options": {
@@ -159,11 +236,13 @@
         "description": "Select any number of destinations, or leave both lists empty for status only. Set up notification providers first. A missing destination is reported at dispatch and retried at the next reminder.",
         "data": {
           "notifiers": "Legacy notify actions",
-          "notify_entities": "Notify entities"
+          "notify_entities": "Notify entities",
+          "configure_outputs": "Add or edit light, siren, speaker, and custom outputs"
         },
         "data_description": {
           "notifiers": "Choose an action such as mobile_app_my_phone or persistent_notification. You can also enter a missing action name. Use a notify group for provider-specific top-level targets.",
-          "notify_entities": "Uses notify.send_message. Home Assistant 2026.9.2 supports message and title only for these targets. Use a legacy action if you need extra data, tags, or action buttons."
+          "notify_entities": "Uses notify.send_message. Home Assistant 2026.9.2 supports message and title only for these targets. Use a legacy action if you need extra data, tags, or action buttons.",
+          "configure_outputs": "Open the output editor next. Leaving this off preserves existing outputs. Phone destinations may be empty when using device outputs."
         }
       },
       "messages": {
@@ -185,6 +264,79 @@
       "review": {
         "title": "Review alert",
         "description": "**{name}**\n\nWatch `{entity}` for `{state}`. Current source state and unit: `{current}`. Recovery: {recovery}.\n\nFirst notification after activation: {first}. Repeat delays in minutes: {schedule}; the final delay repeats indefinitely.\n\n{reliability}\n\nDestinations: {destinations}\n\nResolution: {completion}\n\nSubmit to save. No test notification is sent automatically. Startup evaluation or restored overdue reminders may send a real alert. Use the Test notification button on the alert device to test explicitly."
+      },
+      "outputs": {
+        "title": "Alert outputs",
+        "description": "Configured outputs: {outputs}\n\nCombine outputs with phone notifications or use them on their own. Save the alert before testing an individual output from its device page.",
+        "menu_options": {
+          "output_add": "Add output",
+          "output_edit": "Edit output",
+          "output_remove": "Remove output",
+          "messages": "Continue to notification content"
+        }
+      },
+      "output_add": {
+        "title": "Add output",
+        "data": {
+          "type": "Output type"
+        }
+      },
+      "output_edit": {
+        "title": "Edit output",
+        "data": {
+          "output_id": "Output"
+        }
+      },
+      "output_remove": {
+        "title": "Remove output",
+        "description": "This removal takes effect when you finish and save the alert.",
+        "data": {
+          "output_id": "Output to remove"
+        }
+      },
+      "output_settings": {
+        "title": "Configure output",
+        "description": "Output type: {type}. Acknowledge and Snooze cancel running effects. Set the desired duration and cleanup behavior here.",
+        "data": {
+          "name": "Output name",
+          "repeat": "Run at every reminder",
+          "duration": "Maximum effect duration (seconds)",
+          "entities": "Devices to alert through",
+          "pattern": "Light pattern",
+          "interval": "Time between light changes (seconds)",
+          "color": "Light color",
+          "brightness": "Light brightness (%)",
+          "restore": "Restore previous light state or speaker volume",
+          "volume": "Volume (0–1)",
+          "tone": "Siren tone",
+          "tts_entity": "Text-to-speech provider",
+          "message": "Spoken alert message",
+          "recovery_message": "Spoken recovery message",
+          "language": "Language",
+          "media_url": "Audio URL or media-source URI",
+          "media_type": "Media content type",
+          "actions": "Alert actions",
+          "stop_actions": "Stop / cleanup actions",
+          "recovery_actions": "Recovery actions"
+        },
+        "data_description": {
+          "repeat": "Off runs once per incident at its first notification opportunity. On follows the reminder schedule. An already-running effect is not duplicated.",
+          "duration": "0.1–300 seconds. Light and siren effects stop at this deadline. Speaker playback is stopped at this limit and may be cut short. Custom actions are time-limited and then run cleanup.",
+          "entities": "Choose up to 20 entities. An unavailable or busy device is reported independently; other outputs still run.",
+          "pattern": "Blink alternates on and off. Steady holds the selected light state for the duration.",
+          "interval": "Used for Blink. Minimum 0.5 seconds; this is separate from the alert reminder interval.",
+          "restore": "Restore lights or speaker volume on completion or cancellation, unless an external change was observed. Playback of previous media cannot be restored generically. With this off, lights are turned off and the chosen speaker volume is retained.",
+          "volume": "Optional. Leave empty to retain the current volume. Supported settings depend on the device.",
+          "tone": "Optional. Enter a tone supported by the selected sirens.",
+          "message": "Optional. Defaults to the alert message. Templates can use alert_name, entity_id, incident_id, and message.",
+          "recovery_message": "Optional. Spoken only when an incident with an earlier notification attempt resolves. Not sent on acknowledgement or snooze.",
+          "language": "Optional language code supported by the selected TTS provider.",
+          "media_url": "An audio URL reachable by the speaker, or a Home Assistant media-source URI.",
+          "media_type": "Defaults to music. Override if your player requires another content type.",
+          "actions": "Use the native action editor; no separate automation is needed. Variables: alert_name, entity_id (watched source), incident_id, and message.",
+          "stop_actions": "Explicit cleanup for anything the custom actions leave enabled. Runs on duration expiry, acknowledgement, snooze, suspension, resolution, edits, or unload. Cleanup has a 10-second budget. These actions also run after an individual test.",
+          "recovery_actions": "Optional separate sequence for resolution after an earlier notification attempt. Use self-contained actions; recovery sequences do not run the stop sequence afterward."
+        }
       }
     },
     "error": {
@@ -199,7 +351,9 @@
       "invalid_duration": "Enter a finite nonnegative delay that fits a valid date. Snooze must be greater than zero and at most 10080 minutes.",
       "invalid_policy": "Select Resolve or Suspend.",
       "invalid_number": "Enter a finite number.",
-      "incompatible_thresholds": "Choose one problem threshold and its corresponding recovery threshold. Recovery must be at or beyond the problem threshold in the recovery direction."
+      "incompatible_thresholds": "Choose one problem threshold and its corresponding recovery threshold. Recovery must be at or beyond the problem threshold in the recovery direction.",
+      "invalid_output": "Check the output settings: choose valid entities, a name, finite values within the displayed limits, and any required provider or audio fields.",
+      "invalid_actions": "Enter a valid Home Assistant action sequence. Check device actions, templates, and required fields."
     }
   },
   "entity": {
@@ -233,6 +387,17 @@
       },
       "cancel_snooze": {
         "name": "Cancel snooze"
+      },
+      "test_output": {
+        "name": "Test selected output"
+      },
+      "stop_outputs": {
+        "name": "Stop outputs"
+      }
+    },
+    "select": {
+      "test_output": {
+        "name": "Output to test"
       }
     }
   },
@@ -274,6 +439,37 @@
     "cancel_snooze": {
       "name": "Cancel snooze",
       "description": "End temporary silence without clearing acknowledgement or changing the reminder schedule."
+    },
+    "test_output": {
+      "name": "Test selected output",
+      "description": "Start one bounded output without creating an incident or sending phone notifications. Inspect output_errors for failures.",
+      "fields": {
+        "output_id": {
+          "name": "Output ID",
+          "description": "Optional stable ID from the status sensor configured_outputs attribute. Omit to use the Output to test selector."
+        }
+      }
+    },
+    "stop_outputs": {
+      "name": "Stop outputs",
+      "description": "Stop running effects and individual tests, including cleanup. Does not acknowledge the incident; repeated outputs may run at the next reminder."
+    }
+  },
+  "selector": {
+    "output_type": {
+      "options": {
+        "light": "Light: blink or steady",
+        "siren": "Siren",
+        "tts": "Spoken announcement (TTS)",
+        "audio": "Chime or audio",
+        "custom": "Custom actions"
+      }
+    },
+    "light_pattern": {
+      "options": {
+        "blink": "Blink",
+        "steady": "Steady"
+      }
     }
   }
 }

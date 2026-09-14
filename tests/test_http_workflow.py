@@ -160,3 +160,89 @@ async def test_numeric_reliability_http_workflow(
     )
     response = await client.delete(f"/api/config/config_entries/entry/{entry.entry_id}")
     assert response.status == 200
+
+
+async def test_output_http_create_edit_test_and_remove(
+    hass, hass_client, notifications
+):
+    from pytest_homeassistant_custom_component.common import async_mock_service
+    from test_outputs import settle
+
+    assert await async_setup_component(hass, "http", {})
+    assert await async_setup_component(hass, "api", {})
+    config_entries.async_setup(hass)
+    client = await hass_client()
+    hass.states.async_set("siren.hall", "off")
+    on = async_mock_service(hass, "siren", "turn_on")
+    off = async_mock_service(hass, "siren", "turn_off")
+
+    async def submit(result, values, options=False):
+        path = "options/flow" if options else "flow"
+        response = await client.post(
+            f"/api/config/config_entries/{path}/{result['flow_id']}", json=values
+        )
+        assert response.status == 200, await response.text()
+        result = await response.json()
+        assert not result.get("errors"), result
+        return result
+
+    response = await client.post(
+        "/api/config/config_entries/flow", json={"handler": DOMAIN}
+    )
+    result = await response.json()
+    for values in [
+        {"name": "Garage", "entity_id": "binary_sensor.garage"},
+        {"intervals": [{"minutes": 1}]},
+        {"configure_outputs": True},
+        {"next_step_id": "output_add"},
+        {"type": "siren"},
+        {"name": "Hall siren", "entities": ["siren.hall"], "duration": 5},
+        {"next_step_id": "messages"},
+        {},
+        {},
+    ]:
+        result = await submit(result, values)
+    assert result["type"] == "create_entry"
+    await settle(hass)
+    entry = hass.config_entries.async_entries(DOMAIN)[0]
+    output_id = entry.data["outputs"][0]["id"]
+    status = er.async_get(hass).async_get_entity_id(
+        "sensor", DOMAIN, f"{entry.entry_id}_status"
+    )
+    response = await client.post(
+        "/api/services/modern_alerts/test_output",
+        json={"entity_id": status, "output_id": output_id},
+    )
+    assert response.status == 200
+    await settle(hass)
+    assert len(on) == 1 and not entry.runtime_data.attempted and not notifications
+    response = await client.post(
+        "/api/services/modern_alerts/stop_outputs", json={"entity_id": status}
+    )
+    assert response.status == 200
+    await settle(hass)
+    assert len(off) == 1
+    response = await client.post(
+        "/api/config/config_entries/options/flow", json={"handler": entry.entry_id}
+    )
+    result = await response.json()
+    for values in [
+        {"name": "Garage", "entity_id": "binary_sensor.garage"},
+        {"intervals": [{"minutes": 1}]},
+        {"configure_outputs": True},
+        {"next_step_id": "output_edit"},
+        {"output_id": output_id},
+        {"name": "Renamed siren", "entities": ["siren.hall"], "duration": 2},
+        {"next_step_id": "messages"},
+        {},
+        {},
+    ]:
+        result = await submit(result, values, options=True)
+    await settle(hass)
+    assert entry.runtime_data.config.outputs[0]["id"] == output_id
+    assert entry.runtime_data.config.outputs[0]["duration"] == 2
+    runtime = entry.runtime_data
+    response = await client.delete(f"/api/config/config_entries/entry/{entry.entry_id}")
+    assert response.status == 200
+    await settle(hass)
+    assert not runtime.outputs._tasks
