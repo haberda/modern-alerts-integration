@@ -51,7 +51,12 @@ class AlertFlowSteps(OutputFlowSteps, DeliveryFlowSteps):
                 if step_id == "user"
                 else self._values.get("kind", "alert")
             )
-            if values.get("conditions") and not values.get("entity_id"):
+            if (
+                isinstance(values.get("conditions"), list)
+                and values["conditions"]
+                and isinstance(values["conditions"][0], dict)
+                and not values.get("entity_id")
+            ):
                 values["entity_id"] = values["conditions"][0].get("entity_id")
             if values["kind"] == "profile":
                 values["entity_id"] = "sensor.modern_alerts_profile"
@@ -78,6 +83,8 @@ class AlertFlowSteps(OutputFlowSteps, DeliveryFlowSteps):
                     }
                 )
             )
+            action_field = next(key for key in fields if key.schema == "setup_action")
+            fields = {action_field: fields.pop(action_field), **fields}
             # Selecting a draft source must not require a name or watched entity.
             fields.pop(vol.Required("name"))
             fields[vol.Optional("name")] = selector.TextSelector()
