@@ -95,11 +95,15 @@ class AlertRuntime:
 
     @property
     def effective_config(self):
+        return self.delivery_config(update_errors=True)
+
+    def delivery_config(self, *, update_errors=False):
+        """Resolve current destinations; previews do not mutate diagnostics."""
         config, missing = resolve(self.hass, self.config)
-        self.policy_errors = {"profiles": "unavailable"} if missing else {}
+        errors = {"profiles": "unavailable"} if missing else {}
         staged = {key for stage in config.stages for key in stage["output_ids"]}
         if staged - {item["id"] for item in config.outputs}:
-            self.policy_errors["stages"] = "missing_outputs"
+            errors["stages"] = "missing_outputs"
         enabled = set()
         notifiers, entities = list(config.notifiers), list(config.notify_entities)
         for stage in config.stages[: self.stage_index]:
@@ -107,8 +111,10 @@ class AlertRuntime:
             notifiers.extend(stage["notifiers"])
             entities.extend(stage["notify_entities"])
         if config.data and entities:
-            self.policy_errors["notify_entities"] = "extra_data_unsupported"
+            errors["notify_entities"] = "extra_data_unsupported"
             entities = []
+        if update_errors:
+            self.policy_errors = errors
         return replace(
             config,
             notifiers=tuple(dict.fromkeys(notifiers)),

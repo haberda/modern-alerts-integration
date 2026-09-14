@@ -1,3 +1,6 @@
 # This fixture package pins Home Assistant 2026.9.2 and pytest dependencies.
 pytest-homeassistant-custom-component==0.13.365
 ruff==0.16.7
+
+# Match the frontend pinned by Home Assistant for panel/HTTP tests.
+home-assistant-frontend==20260826.7

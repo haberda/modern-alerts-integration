@@ -12,6 +12,11 @@ from homeassistant.helpers.storage import Store
 from homeassistant.helpers.typing import ConfigType
 
 from .const import DOMAIN
+from .frontend import (
+    async_ensure_panel,
+    async_remove_panel_if_unused,
+    async_setup_frontend,
+)
 from .grouping import groups
 from .models import AlertConfig, InvalidConfig
 from .profiles import PROFILES, RUNTIMES, refresh
@@ -23,6 +28,7 @@ type ModernAlertsEntry = ConfigEntry[AlertRuntime]
 
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     """Register actions targeting only this integration's status entities."""
+    await async_setup_frontend(hass)
     for service, method in {
         "acknowledge": "async_turn_off",
         "unacknowledge": "async_turn_on",
@@ -87,6 +93,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ModernAlertsEntry) -> bo
         await refresh(hass)
         return True
     hass.data.setdefault(RUNTIMES, {})[entry.entry_id] = entry.runtime_data
+    await async_ensure_panel(hass)
     store = Store(
         hass, 1, f"modern_alerts.{entry.entry_id}", private=True, atomic_writes=True
     )
@@ -140,6 +147,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ModernAlertsEntry) -> b
     if await hass.config_entries.async_unload_platforms(entry, PLATFORMS):
         hass.data.get(RUNTIMES, {}).pop(entry.entry_id, None)
         await entry.runtime_data.async_stop()
+        async_remove_panel_if_unused(hass)
         return True
     return False
 
