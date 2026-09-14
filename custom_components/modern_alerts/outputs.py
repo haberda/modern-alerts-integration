@@ -45,8 +45,8 @@ class DeviceSession:
         self.context = context
         self.before = hass.states.get(entity_id)
         self.external_change = False
-        self.command_pending = False
         self.used = False
+        self.playback_started = False
         self.last = self.signature(self.before)
         self.unsubscribe = async_track_state_change_event(
             hass, [entity_id], self.changed
@@ -83,27 +83,22 @@ class DeviceSession:
             event.context.id == self.context.id
             or event.context.parent_id == self.context.id
         )
-        if not own and not self.command_pending and signature != self.last:
+        if not own and signature != self.last:
             self.external_change = True
         self.last = signature
 
     async def call(self, domain, service, **data):
         if self.external_change:
             return
-        self.command_pending = True
         self.used = True
-        try:
-            async with asyncio.timeout(NOTIFY_TIMEOUT):
-                await self.hass.services.async_call(
-                    domain,
-                    service,
-                    {"entity_id": self.entity_id, **data},
-                    blocking=True,
-                    context=self.context,
-                )
-        finally:
-            self.command_pending = False
-            self.last = self.signature(self.hass.states.get(self.entity_id))
+        async with asyncio.timeout(NOTIFY_TIMEOUT):
+            await self.hass.services.async_call(
+                domain,
+                service,
+                {"entity_id": self.entity_id, **data},
+                blocking=True,
+                context=self.context,
+            )
 
     async def restore_light(self):
         if self.before is None or self.before.state not in ("on", "off"):
@@ -359,18 +354,15 @@ class OutputManager:
                 }
                 if output.get("language"):
                     data["language"] = output["language"]
-                session.used = session.command_pending = True
-                try:
-                    async with asyncio.timeout(NOTIFY_TIMEOUT):
-                        await self.hass.services.async_call(
-                            "tts", "speak", data, blocking=True, context=session.context
-                        )
-                finally:
-                    session.command_pending = False
-                    session.last = session.signature(
-                        self.hass.states.get(session.entity_id)
+                if session.external_change:
+                    return
+                session.used = session.playback_started = True
+                async with asyncio.timeout(NOTIFY_TIMEOUT):
+                    await self.hass.services.async_call(
+                        "tts", "speak", data, blocking=True, context=session.context
                     )
             else:
+                session.playback_started = True
                 await session.call(
                     "media_player",
                     "play_media",
@@ -391,7 +383,8 @@ class OutputManager:
         elif kind == "siren":
             await session.call("siren", "turn_off")
         else:
-            await session.call("media_player", "media_stop")
+            if session.playback_started:
+                await session.call("media_player", "media_stop")
             if (
                 output["restore"]
                 and output.get("volume") is not None

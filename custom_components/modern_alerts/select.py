@@ -14,7 +14,7 @@ async def async_setup_entry(hass, entry: ModernAlertsEntry, async_add_entities):
 
 
 class OutputSelection(ModernAlertEntity, SelectEntity):
-    """Output names plus stable IDs distinguish even duplicate names."""
+    """Numbered output names distinguish duplicates without exposing IDs."""
 
     def __init__(self, entry):
         super().__init__(entry, "test_output")
@@ -23,7 +23,8 @@ class OutputSelection(ModernAlertEntity, SelectEntity):
     @property
     def options(self):
         return [
-            f"{item['name']} ({item['id']})" for item in self.runtime.config.outputs
+            f"{index}. {item['name']}"
+            for index, item in enumerate(self.runtime.config.outputs, 1)
         ]
 
     @property

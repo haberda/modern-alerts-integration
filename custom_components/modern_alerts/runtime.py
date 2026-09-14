@@ -592,6 +592,8 @@ class AlertRuntime:
         snapshot = self.snapshot()
         await self.async_stop()
         self.config = config
+        if not any(item["id"] == self.test_output_id for item in config.outputs):
+            self.test_output_id = None
         if old.restore_state and not config.restore_state:
             await self.async_save()
         condition_changed = old_condition != self._condition()

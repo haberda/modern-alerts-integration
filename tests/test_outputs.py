@@ -382,7 +382,7 @@ async def test_selected_output_buttons_and_live_options(hass, devices, notificat
     await hass.services.async_call(
         "select",
         "select_option",
-        {"entity_id": selection, "option": "Siren (siren)"},
+        {"entity_id": selection, "option": "2. Siren"},
         blocking=True,
     )
     await hass.services.async_call(
@@ -401,7 +401,93 @@ async def test_selected_output_buttons_and_live_options(hass, devices, notificat
         blocking=True,
     )
     assert len(devices["siren", "turn_off"]) == 1
+    hass.config_entries.async_update_entry(
+        entry, options={**entry.data, "outputs": entry.data["outputs"][:1]}
+    )
+    await settle(hass)
+    assert hass.states.get(selection).state == "1. Audio"
+    await hass.services.async_call(
+        "button", "press", {"entity_id": button}, blocking=True
+    )
+    await settle(hass)
+    assert len(devices["media_player", "play_media"]) == 1
     hass.config_entries.async_update_entry(entry, options={**entry.data, "outputs": []})
     await settle(hass)
     assert hass.states.get(selection).state == "unavailable"
     assert hass.states.get(button).state == "unavailable"
+
+
+async def test_manual_change_during_slow_light_command_is_preserved(
+    hass, make_runtime, devices
+):
+    entered, release = asyncio.Event(), asyncio.Event()
+
+    async def slow(call):
+        entered.set()
+        await release.wait()
+
+    hass.services.async_register("light", "turn_on", slow)
+    runtime = make_runtime(
+        outputs=[output("light", entities=["light.hall"], pattern="steady")]
+    )
+    hass.states.async_set("binary_sensor.garage", "on")
+    await entered.wait()
+    hass.states.async_set("light.hall", "on", {"brightness": 123}, context=Context())
+    # Let the state event reach the output before cancelling the pending call.
+    for _ in range(5):
+        await asyncio.sleep(0)
+    runtime.acknowledge(True)
+    release.set()
+    await settle(hass)
+    assert not devices["light", "turn_off"]
+    assert hass.states.get("light.hall").attributes["brightness"] == 123
+    assert not runtime.outputs.active
+
+
+async def test_native_light_service_schema_and_context(hass, make_runtime, freezer):
+    from homeassistant.components.light import ColorMode, LightEntity
+    from homeassistant.setup import async_setup_component
+
+    assert await async_setup_component(hass, "light", {})
+    calls = []
+
+    class Lamp(LightEntity):
+        _attr_name = "Test lamp"
+        _attr_unique_id = "test_lamp"
+        _attr_supported_color_modes = {ColorMode.RGB}
+        _attr_color_mode = ColorMode.RGB
+        _attr_rgb_color = (10, 20, 30)
+        _attr_brightness = 90
+        _attr_is_on = True
+        _attr_should_poll = False
+
+        async def async_turn_on(self, **kwargs):
+            calls.append(("on", kwargs))
+            self._attr_is_on = True
+            self._attr_brightness = kwargs.get("brightness", self._attr_brightness)
+            self._attr_rgb_color = kwargs.get("rgb_color", self._attr_rgb_color)
+            self.async_write_ha_state()
+
+        async def async_turn_off(self, **kwargs):
+            calls.append(("off", kwargs))
+            self._attr_is_on = False
+            self.async_write_ha_state()
+
+    lamp = Lamp()
+    await hass.data["light"].async_add_entities([lamp])
+    runtime = make_runtime(
+        outputs=[
+            output(
+                "light", entities=[lamp.entity_id], brightness=100, color=[255, 0, 0]
+            )
+        ]
+    )
+    await set_state(hass, "on")
+    assert calls[0][1]["brightness"] == 255
+    assert not runtime.outputs.errors
+    await advance(hass, freezer, 1 / 60)
+    assert calls[-1][0] == "off"
+    runtime.acknowledge(True)
+    await settle(hass)
+    assert calls[-1][1]["brightness"] == 90
+    assert tuple(calls[-1][1]["rgb_color"]) == (10, 20, 30)
