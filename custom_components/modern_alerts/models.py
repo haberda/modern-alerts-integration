@@ -14,6 +14,7 @@ from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.template import Template
 from homeassistant.util import dt as dt_util
 
+from .conditions import validate_conditions
 from .const import MIN_REPEAT
 from .output_config import InvalidOutput, validate_outputs
 from .policies import InvalidPolicy, validate_policy, validate_stages
@@ -64,6 +65,8 @@ class AlertConfig:
     stages: tuple[dict[str, Any], ...] = ()
     delivery: dict[str, Any] = field(default_factory=dict)
     history_limit: int = 50
+    conditions: tuple[dict[str, Any], ...] = ()
+    condition_mode: str = "all"
 
     @classmethod
     def from_dict(cls, values: Mapping[str, Any], hass: HomeAssistant) -> AlertConfig:
@@ -76,6 +79,14 @@ class AlertConfig:
             entity_id = cv.entity_id(values["entity_id"])
         except vol.Invalid as err:
             raise InvalidConfig("entity_id", "invalid_entity") from err
+
+        try:
+            conditions = validate_conditions(values.get("conditions", []))
+        except ValueError as err:
+            raise InvalidConfig("conditions", "invalid_conditions") from err
+        condition_mode = values.get("condition_mode", "all")
+        if condition_mode not in ("all", "any"):
+            raise InvalidConfig("condition_mode", "invalid_conditions")
 
         raw = values.get("repeat", [30])
         if not isinstance(raw, list | tuple):
@@ -235,6 +246,8 @@ class AlertConfig:
             stages=stages,
             delivery=delivery,
             history_limit=history_limit,
+            conditions=conditions,
+            condition_mode=condition_mode,
             **flags,
             **templates,
             **lists,
@@ -275,4 +288,6 @@ class AlertConfig:
             "stages": deepcopy(list(self.stages)),
             "delivery": deepcopy(self.delivery),
             "history_limit": self.history_limit,
+            "conditions": deepcopy(list(self.conditions)),
+            "condition_mode": self.condition_mode,
         }

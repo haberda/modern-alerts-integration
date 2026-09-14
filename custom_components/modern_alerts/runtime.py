@@ -23,6 +23,7 @@ from homeassistant.helpers.event import (
 )
 from homeassistant.util import dt as dt_util
 
+from .conditions import evaluate as evaluate_conditions
 from .grouping import groups
 from .models import AlertConfig
 from .notifications import async_notify
@@ -244,6 +245,12 @@ class AlertRuntime:
             listener()
 
     def _condition(self) -> list[Any]:
+        if self.config.conditions:
+            return [
+                "compound",
+                self.config.condition_mode,
+                list(self.config.conditions),
+            ]
         return [
             self.config.entity_id,
             self.config.state,
@@ -260,7 +267,11 @@ class AlertRuntime:
             return
         self._stopped = False
         self._unsubscribe = async_track_state_change_event(
-            self.hass, [self.config.entity_id], self._state_changed
+            self.hass,
+            list({row["entity_id"] for row in self.config.conditions})
+            if self.config.conditions
+            else [self.config.entity_id],
+            self._state_changed,
         )
         if self._restored or self.config.evaluate_on_start:
             state = self.hass.states.get(self.config.entity_id)
@@ -424,6 +435,7 @@ class AlertRuntime:
         state = event.data["new_state"]
         if (
             state is None
+            and not self.config.conditions
             and self.config.unavailable_policy == "resolve"
             and not self._awaiting_source
             and self.config.numeric_below is None
@@ -436,7 +448,11 @@ class AlertRuntime:
     @callback
     def _evaluate(self, state: str) -> None:
         matches = self._matches(state)
-        uncertain = state in ("unknown", "unavailable") and state != self.config.state
+        uncertain = (
+            not self.config.conditions
+            and state in ("unknown", "unavailable")
+            and state != self.config.state
+        )
         if matches is None or (
             uncertain
             and (self.config.unavailable_policy == "suspend" or self._awaiting_source)
@@ -469,6 +485,17 @@ class AlertRuntime:
         self._publish()
 
     def _matches(self, state: str) -> bool | None:
+        if self.config.conditions:
+            result = evaluate_conditions(
+                self.hass, self.config.conditions, self.config.condition_mode
+            )
+            if (
+                result is None
+                and self.config.unavailable_policy == "resolve"
+                and not self._awaiting_source
+            ):
+                return False
+            return result
         if self.config.numeric_below is None and self.config.numeric_above is None:
             return state == self.config.state
         if self.config.numeric_unit:
@@ -559,7 +586,9 @@ class AlertRuntime:
             return
         if self.pending_due and self.pending_due <= now:
             state = self.hass.states.get(self.config.entity_id)
-            if state and self._matches(state.state) == self.pending_active:
+            if (state or self.config.conditions) and self._matches(
+                state.state if state else "unavailable"
+            ) == self.pending_active:
                 self._transition(self.pending_active)
             else:
                 self.pending_active = self.pending_due = None
@@ -923,7 +952,8 @@ class AlertRuntime:
         if (state := self.hass.states.get(config.entity_id)) is not None:
             self._evaluate(state.state)
         elif (
-            config.unavailable_policy == "suspend"
+            config.conditions
+            or config.unavailable_policy == "suspend"
             or config.numeric_below is not None
             or config.numeric_above is not None
         ):

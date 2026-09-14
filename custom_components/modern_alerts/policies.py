@@ -7,6 +7,8 @@ import voluptuous as vol
 from homeassistant.helpers import config_validation as cv
 from homeassistant.util import dt as dt_util
 
+WEEKDAYS = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
+
 
 class InvalidPolicy(ValueError):
     def __init__(self, field):
@@ -30,6 +32,33 @@ def validate_policy(raw):
     if not isinstance(raw, dict):
         raise InvalidPolicy("delivery")
     result = deepcopy(raw)
+    windows = raw.get("weekly_windows", [])
+    if not isinstance(windows, list) or len(windows) > 28:
+        raise InvalidPolicy("weekly_windows")
+    result["weekly_windows"] = []
+    for window in windows:
+        if not isinstance(window, dict):
+            raise InvalidPolicy("weekly_windows")
+        days = window.get("days", [])
+        start, end = window.get("start"), window.get("end")
+        if (
+            not isinstance(days, list)
+            or not days
+            or any(day not in WEEKDAYS for day in days)
+            or not isinstance(start, str)
+            or not isinstance(end, str)
+            or dt_util.parse_time(start) is None
+            or dt_util.parse_time(end) is None
+            or dt_util.parse_time(start) == dt_util.parse_time(end)
+        ):
+            raise InvalidPolicy("weekly_windows")
+        result["weekly_windows"].append(
+            {
+                "days": list(dict.fromkeys(days)),
+                "start": dt_util.parse_time(start).isoformat(),
+                "end": dt_util.parse_time(end).isoformat(),
+            }
+        )
     for key in ("quiet_start", "quiet_end"):
         value = raw.get(key)
         if value == "":
@@ -67,31 +96,63 @@ def validate_policy(raw):
     return result
 
 
-def allowed(hass, policy, now=None):
+def reasons(hass, policy, now=None):
+    """Return current policy blockers without changing scheduling or delivery."""
+    result = []
+    local_now = dt_util.as_local(now or dt_util.utcnow())
+    local = local_now.time().replace(tzinfo=None)
+    windows = policy.get("weekly_windows", [])
+    if windows:
+        inside = False
+        today = WEEKDAYS[local_now.weekday()]
+        yesterday = WEEKDAYS[(local_now.weekday() - 1) % 7]
+        for window in windows:
+            start, end = (
+                dt_util.parse_time(window["start"]),
+                dt_util.parse_time(window["end"]),
+            )
+            if start < end:
+                inside |= today in window["days"] and start <= local < end
+            else:
+                inside |= (today in window["days"] and local >= start) or (
+                    yesterday in window["days"] and local < end
+                )
+        if not inside:
+            result.append("outside_weekly_schedule")
     start, end = policy.get("quiet_start"), policy.get("quiet_end")
     if start and end:
-        local = dt_util.as_local(now or dt_util.utcnow()).time().replace(tzinfo=None)
         start, end = dt_util.parse_time(start), dt_util.parse_time(end)
         quiet = start <= local < end if start < end else local >= start or local < end
         if quiet:
-            return False
+            result.append("quiet_hours")
     entities = policy.get("presence_entities", [])
-    if not entities:
-        return True
-    states = [hass.states.get(entity) for entity in entities]
-    home = [state is not None and state.state in ("home", "on") for state in states]
-    if policy.get("presence_mode", "any_home") == "any_home":
-        return any(home)
-    # Uncertain presence is not proof that everybody is away.
-    return all(
-        state is not None
-        and state.state not in ("unknown", "unavailable", "home", "on")
-        for state in states
-    )
+    if entities:
+        states = [hass.states.get(entity) for entity in entities]
+        home = [state is not None and state.state in ("home", "on") for state in states]
+        present = (
+            any(home)
+            if policy.get("presence_mode", "any_home") == "any_home"
+            else all(
+                state is not None
+                and state.state not in ("unknown", "unavailable", "home", "on")
+                for state in states
+            )
+        )
+        if not present:
+            result.append("presence")
+    return result
+
+
+def allowed(hass, policy, now=None):
+    return not reasons(hass, policy, now)
 
 
 def has_policy(policy):
-    return bool(policy.get("quiet_start") or policy.get("presence_entities"))
+    return bool(
+        policy.get("quiet_start")
+        or policy.get("presence_entities")
+        or policy.get("weekly_windows")
+    )
 
 
 def validate_stages(raw):
