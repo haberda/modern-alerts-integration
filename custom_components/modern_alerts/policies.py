@@ -31,12 +31,16 @@ def validate_policy(raw):
         raise InvalidPolicy("delivery")
     result = deepcopy(raw)
     for key in ("quiet_start", "quiet_end"):
-        value = raw.get(key) or None
+        value = raw.get(key)
+        if value == "":
+            value = None
         if value is not None and (
             not isinstance(value, str) or dt_util.parse_time(value) is None
         ):
             raise InvalidPolicy(key)
-        result[key] = value
+        result[key] = (
+            dt_util.parse_time(value).isoformat() if value is not None else None
+        )
     if bool(result["quiet_start"]) != bool(result["quiet_end"]) or (
         result["quiet_start"] and result["quiet_start"] == result["quiet_end"]
     ):

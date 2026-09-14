@@ -33,8 +33,8 @@ class NotificationGroups:
         policy = config.delivery
         key = (
             ("group", policy["group"]) if policy.get("group") else ("alert", owner),
-            config.notifiers,
-            config.notify_entities,
+            tuple(sorted(config.notifiers)),
+            tuple(sorted(config.notify_entities)),
             config.title,
             json.dumps(config.data, sort_keys=True),
         )

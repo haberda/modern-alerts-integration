@@ -97,12 +97,17 @@ class AlertRuntime:
         config, missing = resolve(self.hass, self.config)
         self.policy_errors = {"profiles": "unavailable"} if missing else {}
         staged = {key for stage in config.stages for key in stage["output_ids"]}
+        if staged - {item["id"] for item in config.outputs}:
+            self.policy_errors["stages"] = "missing_outputs"
         enabled = set()
         notifiers, entities = list(config.notifiers), list(config.notify_entities)
         for stage in config.stages[: self.stage_index]:
             enabled.update(stage["output_ids"])
             notifiers.extend(stage["notifiers"])
             entities.extend(stage["notify_entities"])
+        if config.data and entities:
+            self.policy_errors["notify_entities"] = "extra_data_unsupported"
+            entities = []
         return replace(
             config,
             notifiers=tuple(dict.fromkeys(notifiers)),
@@ -201,8 +206,9 @@ class AlertRuntime:
             for item in config.outputs
             if not allowed(self.hass, item.get("delivery", {}))
         }
-        self.outputs.stop_ids(blocked)
-        self._pending_outputs.update(blocked)
+        active_blocked = blocked.intersection(self.outputs.active)
+        self.outputs.stop_ids(active_blocked)
+        self._pending_outputs.update(active_blocked)
         self._pending_outputs.intersection_update(item["id"] for item in config.outputs)
         self._dispatch_outputs(config, pending_only=True)
         if self._pending_notification and allowed(self.hass, config.delivery):
@@ -668,7 +674,11 @@ class AlertRuntime:
                 if (
                     not done
                     and not (config.notifiers or config.notify_entities)
-                    and self.all_outputs
+                    and (
+                        self.all_outputs
+                        or self.config.profile_ids
+                        or self.config.stages
+                    )
                 ):
                     return
                 if not done and (

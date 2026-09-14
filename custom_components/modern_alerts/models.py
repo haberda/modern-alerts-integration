@@ -214,6 +214,7 @@ class AlertConfig:
         if (
             kind not in ("alert", "profile")
             or not isinstance(profiles, list | tuple)
+            or len(profiles) > 20
             or any(not isinstance(key, str) for key in profiles)
             or (kind == "profile" and profiles)
         ):
