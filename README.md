@@ -2,7 +2,7 @@
 
 A custom Home Assistant integration that reproduces the built-in Alert lifecycle with setup and editing through **Settings → Devices & services**. Each alert has a status sensor, a problem binary sensor, and buttons to acknowledge, snooze, resume, and test notifications.
 
-**Version 0.5.0 targets Home Assistant 2026.9.2 (Python 3.14).** The test suite runs against that exact release. Earlier versions are not supported; newer releases require compatibility testing. This integration uses its own `modern_alerts` actions and standard entities, so existing `alert.*` references need migration.
+**Version 0.5.0 targets Home Assistant 2026.9.2 (Python 3.14).** Earlier versions are not supported. This integration uses its own `modern_alerts` actions and standard entities, so existing `alert.*` references need migration.
 
 ## Install
 
@@ -30,7 +30,7 @@ HACS requires a **public GitHub repository**. The current `git.haber.haus` remot
 4. Restart Home Assistant.
 5. Open **Settings → Devices & services → Add integration → Modern Alerts**.
 
-Home Assistant **2026.9.2 or newer** is required by the HACS metadata; compatibility is tested against 2026.9.2. HACS downloads `custom_components/modern_alerts`, including its frontend and translations. No separate dashboard resource or release ZIP is needed. Existing manual installations can use the same integration directory and domain when adopting HACS.
+Home Assistant **2026.9.2 or newer** is required by the HACS metadata. HACS downloads `custom_components/modern_alerts`, including its frontend and translations. No separate dashboard resource or release ZIP is needed. Existing manual installations can use the same integration directory and domain when adopting HACS.
 
 The integration includes local Home Assistant brand assets in `custom_components/modern_alerts/brand/`. Home Assistant 2026.3 and newer use `icon.png` and `logo.png` from that directory for the integration tile and brand proxy; older versions may continue to show the generic custom-integration artwork until the integration is added to the central Home Assistant Brands repository.
 
@@ -183,7 +183,7 @@ Recreate and review the alert, disable the corresponding legacy alert, then acti
 
 ## Parity and deliberate differences
 
-The lifecycle, fixed/list/fractional intervals, immediate/delayed start, acknowledgement, rearming, templates, completion eligibility, multiple legacy notifiers, provider data, and state-only operation are implemented. Differential tests compare states and notification payloads directly with the installed `homeassistant.components.alert` implementation.
+The lifecycle, fixed/list/fractional intervals, immediate/delayed start, acknowledgement, rearming, templates, completion eligibility, multiple legacy notifiers, provider data, and state-only operation are implemented.
 
 Completion eligibility means that an alert notification was **attempted**, not confirmed delivered or read. Resolving before the first attempt sends no completion message. Acknowledging after an attempt still allows completion. Under the default exact-state policy, missing source entities are ignored and a nonmatching `unknown` or `unavailable` state resolves the incident, matching built-in Alert. Choose those strings as the matching state if the alert should specifically detect that condition.
 
@@ -232,24 +232,6 @@ Set a minimum notification interval to coalesce frequent repeats. With no group,
 
 **Incident history.** The status sensor exposes the latest lifecycle, escalation, notification attempt/result, and output start/stop/error events, along with `incident_started`, `escalation_stage`, and `policy_errors`. The configurable limit defaults to 50 entries; choose 0 to disable or up to 100. Records contain timestamps, incident/output identifiers, and error categories—not rendered messages or notification payloads. Enable incident restoration to preserve this history across reloads. Download diagnostics from the integration entry for the same bounded metadata, or use **Clear incident history** targeting the status sensor to clear the integration's current history without changing the incident. Clearing it does not remove historical snapshots already retained by Home Assistant Recorder.
 
-## Development and validation
-
-Use Python 3.14:
-
-```sh
-python -m venv .venv
-.venv/bin/python -m pip install -r requirements-test.txt
-.venv/bin/ruff check custom_components tests
-.venv/bin/ruff format --check custom_components tests
-.venv/bin/python -m pytest --timeout=20 --cov=custom_components.modern_alerts --cov-report=term-missing
-```
-
-The pinned test fixture package installs Home Assistant 2026.9.2. Tests cover lifecycle behavior, notification adapters, validation, real config/options managers, registry entities, action targeting, deletion/reload, restored deadlines, debounce cancellation, hysteresis/unit checks, snooze, stale phone actions, output cleanup, shared-device ownership, real light service handling, custom-action cancellation, slow-provider races, and creation/edit/deletion through the authenticated HTTP endpoints used by the UI. External notification delivery is mocked; the HTTP workflow test uses a local test server. These checks do not substitute for rendering the forms in an installed frontend or testing delivery on a real phone.
-
-The optional browser smoke test uses an installed Firefox with its built-in WebDriver BiDi server; it is skipped when Firefox is unavailable. The Python/HTTP/WebSocket tests use the exact frontend package pinned in `requirements-test.txt`.
-
-Before using on your installation, create an alert watching an Input boolean helper with a short interval, test immediate and delayed notifications, acknowledge/resume it, clear it, and edit/delete it through Devices & services. Verify the intended behavior with your actual notification provider.
-
 ## References
 
 - [Built-in Alert documentation](https://www.home-assistant.io/integrations/alert/)
@@ -258,3 +240,5 @@ Before using on your installation, create an alert watching an Input boolean hel
 - [Companion notification behavior](https://companion.home-assistant.io/docs/notifications/notifications-basic/)
 
 MIT licensed; see [LICENSE](LICENSE).
+
+This integration was created with the help of AI tools.
