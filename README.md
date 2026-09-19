@@ -208,7 +208,7 @@ The status sensor exposes `snoozed_until`, `source_suspended`, `pending_transiti
 
 Restoration uses private, atomic Home Assistant storage with coalesced writes and an explicit save on unload/shutdown. Disabling restoration clears saved incident data; deleting the entry removes it. Old incomplete snapshots from the initial experimental persistence implementation are ignored; corrupt snapshots start fresh and expose `restore: invalid_snapshot`. There is no exactly-once delivery guarantee across a crash: a crash near dispatch or before the coalesced write can lose recent state or repeat a notification. A currently matching source is treated as continuation of the saved incident because transitions during downtime cannot be known.
 
-Migration import, native compound-condition builders, richer schedules, and a dedicated overview dashboard remain future work.
+Migration import, native compound-condition builders, weekly schedules, and the overview dashboard are included in 0.5.0. The remaining publishing work is external: publish the repository on GitHub, register the integration with Home Assistant Brands, publish a tagged release, and run the HACS validation workflow.
 
 ## Escalation, delivery rules, profiles, and history
 
