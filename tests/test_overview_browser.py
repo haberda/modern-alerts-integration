@@ -10,9 +10,12 @@ import pytest
 from aiohttp import web
 
 
+# A cold headless Firefox on a shared CI runner can take far longer to open
+# its debugging port than on a workstation.
+@pytest.mark.timeout(150)
 @pytest.mark.skipif(shutil.which("firefox") is None, reason="Firefox not installed")
 async def test_overview_browser_controls_preview_and_safe_text(
-    tmp_path, unused_tcp_port, aiohttp_server, socket_enabled
+    socket_enabled, tmp_path, unused_tcp_port, aiohttp_server
 ):
     """Exercise the browser DOM through Firefox's built-in WebDriver BiDi server."""
     source = (
@@ -56,7 +59,7 @@ async def test_overview_browser_controls_preview_and_safe_text(
         async with aiohttp.ClientSession(
             timeout=aiohttp.ClientTimeout(total=2)
         ) as session:
-            async with asyncio.timeout(10):
+            async with asyncio.timeout(90):
                 while True:
                     try:
                         socket = await session.ws_connect(

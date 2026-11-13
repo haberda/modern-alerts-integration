@@ -9,6 +9,10 @@ from custom_components.modern_alerts.const import DOMAIN
 
 async def test_frontend_workflow(hass, hass_client, notifications):
     assert await async_setup_component(hass, "http", {})
+    assert await async_setup_component(hass, DOMAIN, {})
+    # Views cannot be added once the test client has started the server, so
+    # load the integration and its dependencies first.
+    assert await async_setup_component(hass, DOMAIN, {})
     config_entries.async_setup(hass)
     client = await hass_client()
     hass.states.async_set("binary_sensor.garage", "off")
@@ -102,6 +106,7 @@ async def test_numeric_reliability_http_workflow(
     from test_runtime import advance
 
     assert await async_setup_component(hass, "http", {})
+    assert await async_setup_component(hass, DOMAIN, {})
     config_entries.async_setup(hass)
     client = await hass_client()
     hass.states.async_set("sensor.battery", "30", {"unit_of_measurement": "%"})
@@ -169,6 +174,7 @@ async def test_output_http_create_edit_test_and_remove(
     from test_outputs import settle
 
     assert await async_setup_component(hass, "http", {})
+    assert await async_setup_component(hass, DOMAIN, {})
     assert await async_setup_component(hass, "api", {})
     config_entries.async_setup(hass)
     client = await hass_client()
@@ -254,6 +260,7 @@ async def test_profiles_and_delivery_policy_http_workflow(
     from test_outputs import settle
 
     assert await async_setup_component(hass, "http", {})
+    assert await async_setup_component(hass, DOMAIN, {})
     config_entries.async_setup(hass)
     client = await hass_client()
 
@@ -340,6 +347,7 @@ async def test_compound_weekly_import_and_duplicate_http(
 ):
     """Use serialized native selectors and complete both draft creation paths."""
     assert await async_setup_component(hass, "http", {})
+    assert await async_setup_component(hass, DOMAIN, {})
     config_entries.async_setup(hass)
     client = await hass_client()
 
