@@ -8,7 +8,7 @@ Add the [GitHub repository](https://github.com/haberda/modern-alerts-integration
 
 The root `hacs.json` uses the README as the HACS description. The integration manifest names `@haberda` as code owner. A repository description with topics such as `home-assistant`, `hacs`, and `alerts` helps HACS present it.
 
-A second workflow runs the linter and the full test suite on every push and pull request. The HACS workflow runs on pushes, pull requests, releases, manual requests, and a weekly schedule. Home Assistant Brands registration is separate; add `modern_alerts` to the Brands repository before submitting the integration for broader distribution. Publish a GitHub release with a tag matching the manifest version, currently `0.6.0`, or HACS will use the default branch.
+A second workflow runs the linter and the full test suite on every push and pull request. The HACS workflow runs on pushes, pull requests, releases, manual requests, and a weekly schedule. Home Assistant Brands registration is separate; add `modern_alerts` to the Brands repository before submitting the integration for broader distribution. Publish a GitHub release with a tag matching the manifest version, currently `0.6.1`, or HACS will use the default branch.
 
 ## Alert lifecycle
 
@@ -102,7 +102,7 @@ A recurring task is an alert whose problem is "this is due" rather than "this en
 
 **After completion.** Intervals of a day or longer fall due at the configured time of day (12:00 by default), so a 180-day task completed at 09:30 is due at noon 180 days later. Shorter intervals are exact. Completing early restarts the interval from the completion.
 
-**Fixed schedule.** Enter a rule such as `FREQ=WEEKLY;BYDAY=TU` and a time of day. Daily, weekly, monthly, and yearly rules are supported. Times are local, so a 17:00 task stays at 17:00 across daylight-saving changes. With a window length, the task is due from the start of each occurrence until it is completed or the window closes. A window that closes unanswered is recorded as `missed`, the reminders stop without a resolution message, and the task waits for the next occurrence. Without a window, the task stays due until it is completed, and occurrences that passed in the meantime are skipped. Completing a fixed task before it is due only skips the coming occurrence when the task is already inside its lead time; otherwise the completion is recorded and the schedule is unchanged. Set **First due** to anchor rules that count, such as every second week.
+**Fixed schedule.** Enter a rule such as `FREQ=WEEKLY;BYDAY=TU` and a time of day. Daily, weekly, monthly, and yearly rules are supported. Times are local, so a 17:00 task stays at 17:00 across daylight-saving changes. With a window length, the task is due from the start of each occurrence until it is completed or the window closes. A window that closes unanswered is recorded as `missed`, the reminders stop without a resolution message, and the task waits for the next occurrence. Without a window, the task stays due until it is completed, and occurrences that passed in the meantime are skipped. Completing a fixed task before it is due only skips the coming occurrence when the task is already inside its lead time; otherwise the completion is recorded and the schedule is unchanged. To let a completion on the day before count for that day's window, set the lead time to 1 day. Set **First due** to anchor rules that count, such as every second week.
 
 **Once.** The task is due at **First due**. After completion it stays idle for good and can be deleted. Changing the date reopens it.
 
@@ -134,13 +134,15 @@ Entity IDs take the task name once, for example `sensor.ro_filter_next_due`. A d
 
 ### Restarts and edits
 
-The next due date, last completion, and missed count are always saved, whether or not **Restore incidents** is enabled. If Home Assistant was off when a task fell due, it becomes due at startup. Windows that opened and closed while it was off are counted as missed. With **Restore incidents** off, a task that is due at startup starts a new incident and notifies again.
+A task always saves and restores everything: the next due date, last completion, missed count, the current incident with its acknowledgement and snooze, the reminder deadline, and history. A task has no entity to look at again after a restart, so the saved state is all there is. The **Restore incidents** and **Evaluate on startup** options do not apply to tasks and are not shown for them.
+
+After a restart or reload, a due task carries on as the same incident. An acknowledged task stays acknowledged and nothing is sent; an unacknowledged one sends its next reminder at the time already scheduled, or once straight away if that time passed during the outage. Phone controls on notifications sent before the restart keep working. If Home Assistant was off when a task fell due, it becomes due at startup. Windows that opened and closed while it was off are counted as missed, without a resolution message.
 
 Editing the interval, rule, time of day, or window recomputes the next due date from the last completion. A task that has never been completed uses **First due** if set, otherwise the present. History is kept. If the edit moves the due date into the future while the task is due, the reminders stop without a resolution message.
 
 ### Importing existing reminders
 
-`modern_alerts.import_task` creates a task from values you already have, so a due date kept in a helper carries over exactly. It is restricted to administrators.
+`modern_alerts.import_task` creates a task from values you already have, so a due date kept in a helper carries over exactly. It is restricted to administrators. When both `next_due` and `last_completed` are given, `next_due` is used as the first due date as it stands, even if it is not the last completion plus the interval; `last_completed` is kept for the attributes. From the first completion onwards the usual interval applies.
 
 ```yaml
 action: modern_alerts.import_task

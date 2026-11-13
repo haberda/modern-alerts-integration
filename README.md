@@ -2,7 +2,7 @@
 
 Modern Alerts is a Home Assistant integration for repeating alerts. You set it up and edit it from **Settings → Devices & services**. Each alert provides a status sensor, a problem binary sensor, and controls for acknowledgement, snoozing, resuming, and notification tests. An alert can watch an entity, or it can be a recurring task that keeps its own schedule, such as a filter change or taking out the garbage.
 
-**Version 0.6.0 targets Home Assistant 2026.9.2 (Python 3.14).** Earlier versions are not supported. This integration uses its own `modern_alerts` actions and standard entities, so existing `alert.*` references need migration.
+**Version 0.6.1 requires Home Assistant 2026.9.2 or newer and Python 3.14.** Home Assistant itself has required Python 3.14 since 2026.3; older versions of either are not supported. See the [changelog](CHANGELOG.md). This integration uses its own `modern_alerts` actions and standard entities, so existing `alert.*` references need migration.
 
 ## Install
 
@@ -61,6 +61,8 @@ In the first setup step, choose **Recurring task** instead of watching an entity
 - **After completion**: due a set interval after it was last done, at a time of day you choose. Use this for filters and services.
 - **Fixed schedule**: due on a calendar rule such as every Tuesday at 17:00, optionally for a limited window. A window that passes without completion is recorded as missed.
 - **Once**: a single reminder.
+
+A task remembers its due date, current reminder, acknowledgement, and history across restarts, and becomes due at startup if its time passed while Home Assistant was off. Completing a fixed-schedule task early only counts for the coming occurrence when it is inside the task's lead time; set the lead time to 1 day so that doing it the day before counts.
 
 A due task behaves like any other alert, with one addition: **Done**. Acknowledging stops the reminders but leaves the task due; only Done completes it and schedules the next one. Done is available as a button, a phone action, the `modern_alerts.complete` action, an NFC tag scan, or an existing mobile action ID. Each task adds a **Next due** timestamp sensor and a **Days remaining** sensor. See [Recurring tasks](docs.md#recurring-tasks) for details.
 
