@@ -8,6 +8,7 @@ from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import Context
 from homeassistant.data_entry_flow import FlowResultType
 from homeassistant.exceptions import ServiceValidationError
+from homeassistant.helpers import entity_registry as er
 from homeassistant.util import dt as dt_util
 from pytest_homeassistant_custom_component.common import (
     MockConfigEntry,
@@ -571,3 +572,16 @@ async def test_import_task_carries_due_date_over(
         await hass.services.async_call(
             DOMAIN, "import_task", {"name": "Broken", "mode": "fixed"}, blocking=True
         )
+
+
+async def test_entity_names_never_repeat_the_setup_name(hass, notifications):
+    """Names come from translation keys; only the device carries the task name."""
+    entry = await setup_task(hass, **filter_task(name="Dan's office filter"))
+    registry = er.async_get(hass)
+    entries = er.async_entries_for_config_entry(registry, entry.entry_id)
+    assert len(entries) == 13
+    for item in entries:
+        assert item.has_entity_name and item.translation_key
+        assert item.entity_id.count("dan_s_office_filter") == 1
+        friendly = hass.states.get(item.entity_id).attributes["friendly_name"]
+        assert friendly.count("Dan's office filter") == 1
