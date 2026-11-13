@@ -8,19 +8,19 @@ HACS requires a public GitHub repository. The current `git.haber.haus` remote ca
 
 The root `hacs.json` uses the README as the HACS description. The integration manifest names `@haberda` as code owner and keeps the current documentation and issue-tracker host. If support moves to GitHub, update those links and add a repository description with topics such as `home-assistant`, `hacs`, and `alerts`.
 
-The HACS workflow runs on pushes, pull requests, releases, manual requests, and a weekly schedule. Home Assistant Brands registration is separate; add `modern_alerts` to the Brands repository before submitting the integration for broader distribution. Publish a GitHub release with a tag matching the manifest version, currently `0.5.0`, or HACS will use the default branch.
+A second workflow runs the linter and the full test suite on every push and pull request. The HACS workflow runs on pushes, pull requests, releases, manual requests, and a weekly schedule. Home Assistant Brands registration is separate; add `modern_alerts` to the Brands repository before submitting the integration for broader distribution. Publish a GitHub release with a tag matching the manifest version, currently `0.6.0`, or HACS will use the default branch.
 
 ## Alert lifecycle
 
 An alert watches a source entity and creates an incident when the configured condition matches. The last reminder interval repeats forever. The first notification can be immediate or delayed with **Skip first notification**.
 
-Acknowledgement silences reminders for the current incident and does not disable monitoring. Snooze pauses delivery for a separate period. Resume clears acknowledgement and snooze, then continues from the existing schedule. When the source recovers, the incident ends and the next one starts unacknowledged. Resolution messages and recovery outputs are sent after acknowledgement unless **Send resolution notification after acknowledgement** is disabled.
+Acknowledgement silences reminders for the current incident and does not disable monitoring. Snooze pauses delivery for a separate period. When a snooze runs out, a reminder is sent straight away and the repeat interval restarts from that moment. Cancelling a snooze early and Resume both continue from the existing schedule instead; Resume also clears acknowledgement. When the source recovers, the incident ends and the next one starts unacknowledged. Resolution messages and recovery outputs are sent after acknowledgement unless **Send resolution notification after acknowledgement** is disabled.
 
 Editing an alert keeps its incident when the watched condition is unchanged. Changes to the source or condition start a fresh incident. Message, destination, and name changes preserve the current deadline; interval changes restart the interval sequence. Configuration unload and deletion stop the alert without sending a resolution message.
 
 ## Conditions and timing
 
-An exact-state condition compares the source state literally. For numeric alerts, choose either Problem below or Problem above and optionally set a recovery threshold. Values are compared in the source's units. An expected unit suspends evaluation when the source has no matching unit.
+An exact-state condition compares the source state literally. For numeric alerts, choose either Problem below or Problem above and optionally set a recovery threshold. A single-entity numeric alert always pauses while its source is unknown, unavailable, or not a number, whichever unavailable-source policy is selected, so a flaky sensor cannot announce a recovery that did not happen. Values are compared in the source's units. An expected unit suspends evaluation when the source has no matching unit.
 
 Compound conditions contain up to 20 state or numeric comparisons. **All** uses AND; **Any** uses OR. Every rule entity is watched. Known false rules can resolve an All group, and known true rules can activate an Any group. If the result remains uncertain, the unavailable-source policy decides whether to resolve or suspend the incident. Use a Template binary sensor for nested logic.
 
@@ -48,7 +48,7 @@ Set the resolution message to `clear_notification` when the provider supports cl
 
 ### Phone controls
 
-Enable **Add Companion phone controls** and select a direct `mobile_app_*` action. Notifications can include Acknowledge, Snooze, and Open alert. Each action carries the alert entry and incident token, so callbacks from old or resolved incidents are ignored. Generated controls replace `data.actions` for those destinations. Notify groups and notify entities do not receive generated controls.
+Enable **Add Companion phone controls** and select a direct `mobile_app_*` action. Notifications can include Acknowledge, Snooze, and Open alert. Each action carries the alert entry and incident token, so callbacks from old or resolved incidents are ignored. The controls stay valid for the whole incident on every recipient's phone: if one person snoozes, another can still acknowledge. Repeated taps do nothing extra. Using Resume issues a new token, so an Acknowledge button on a notification sent before the Resume no longer works. Recurring tasks add a Done control; because Android shows at most three actions, Open alert is left out when Done, Acknowledge, and Snooze are all present. Generated controls replace `data.actions` for those destinations. Notify groups and notify entities do not receive generated controls.
 
 ## Device outputs
 
@@ -62,9 +62,11 @@ Outputs let an alert control lights, sirens, TTS, audio players, and custom Home
 | Chime or audio | Play a URL or `media-source://` URI with an optional content type and volume. |
 | Custom action | Run Home Assistant actions for the alert, cleanup, and optional recovery sequence. |
 
-Outputs can run at every reminder or once per incident. Durations range from 0.1 to 300 seconds; blink intervals range from 0.5 to 60 seconds. Up to 20 outputs and 20 devices per built-in output can be configured.
+Outputs can run at every reminder or once per incident. A run-once output that could not claim any of its devices, because another alert was using them, is tried again at the next reminder. Durations range from 0.1 to 300 seconds; blink intervals range from 0.5 to 60 seconds. Up to 20 outputs and 20 devices per built-in output can be configured.
 
-Acknowledgement, snooze, source suspension, resolution, edits, and unload cancel active effects. Lights restore their previous state when possible, sirens turn off, and speaker playback stops with optional volume restoration. Manual changes detected during an effect make the session yield control and skip restoration. Physical snapshots are not persisted across crashes.
+Acknowledgement, snooze, source suspension, resolution, edits, and unload cancel active effects. Acknowledgement and snooze leave an output test or a recovery announcement running; **Stop outputs** stops those too. Lights restore their previous state when possible, sirens turn off, and speaker playback stops with optional volume restoration.
+
+Manual changes detected during an effect make the session yield control and skip restoration. A change counts as manual when it comes from outside the alert and is more than device rounding. A device confirming the commanded state late, or a speaker reporting that playback started or finished, is not a manual change, so volume is restored after an announcement ends by itself. On a speaker, a different volume or different media counts as manual; pausing or stopping does not. A manual change that happens to match exactly what the alert commanded cannot be told apart from the device confirming it. Physical snapshots are not persisted across crashes.
 
 Built-in outputs coordinate through a per-entity lock. A second alert waits for the first effect and cleanup, with a ten-second limit. Custom actions need explicit cleanup actions because Home Assistant cannot undo arbitrary actions that already ran.
 
@@ -86,7 +88,79 @@ Grouping collects matching alerts for 1–300 seconds. Alerts must share destina
 
 The **Modern Alerts** sidebar shows alert state, incident start, current stage, pending transitions, next delivery opportunities, recent history, and delivery blockers. **Explain delivery** is read-only and does not call notification or device services. Administrators can preview current message, title, and resolution templates.
 
-The status sensor keeps bounded lifecycle, escalation, notification, and output history. It exposes `incident_started`, `escalation_stage`, and `policy_errors`. Set the history limit to 0 to disable it or choose up to 100 entries. History contains timestamps, identifiers, and error categories, not rendered messages or payloads. **Clear incident history** clears current integration history without changing the incident or Home Assistant Recorder data.
+The status sensor keeps bounded lifecycle, escalation, notification, and output history. The history and error attributes are live only: they are excluded from the Recorder, which would otherwise store a large copy on every event. It exposes `incident_started`, `escalation_stage`, and `policy_errors`. Set the history limit to 0 to disable it or choose up to 100 entries. History contains timestamps, identifiers, and error categories, not rendered messages or payloads. **Clear incident history** clears current integration history without changing the incident or Home Assistant Recorder data.
+
+## Recurring tasks
+
+A recurring task is an alert whose problem is "this is due" rather than "this entity is in a state". Choose **Recurring task** in the first setup step. The source cannot be changed afterwards; create a new entry instead.
+
+| Schedule type | Due | Typical use |
+| --- | --- | --- |
+| After completion | An interval after the task was last done | Filters, services |
+| Fixed schedule | On an iCalendar recurrence rule | Garbage day |
+| Once | At one date and time | One-off reminders |
+
+**After completion.** Intervals of a day or longer fall due at the configured time of day (12:00 by default), so a 180-day task completed at 09:30 is due at noon 180 days later. Shorter intervals are exact. Completing early restarts the interval from the completion.
+
+**Fixed schedule.** Enter a rule such as `FREQ=WEEKLY;BYDAY=TU` and a time of day. Daily, weekly, monthly, and yearly rules are supported. Times are local, so a 17:00 task stays at 17:00 across daylight-saving changes. With a window length, the task is due from the start of each occurrence until it is completed or the window closes. A window that closes unanswered is recorded as `missed`, the reminders stop without a resolution message, and the task waits for the next occurrence. Without a window, the task stays due until it is completed, and occurrences that passed in the meantime are skipped. Completing a fixed task before it is due only skips the coming occurrence when the task is already inside its lead time; otherwise the completion is recorded and the schedule is unchanged. Set **First due** to anchor rules that count, such as every second week.
+
+**Once.** The task is due at **First due**. After completion it stays idle for good and can be deleted. Changing the date reopens it.
+
+**Lead time** marks a task as `upcoming` a number of days before it is due. It only sets an attribute and never sends anything early.
+
+### Completing a task
+
+Acknowledging a task stops the reminders for this occurrence. The task stays due, the problem sensor stays on, and days remaining keeps counting below zero. Completing it resolves the incident, sends the resolution message if one is configured, records who or what completed it, and schedules the next due date. A task can be completed by:
+
+- the **Done** button on its device or in the sidebar overview;
+- the **Done** control on a Companion notification;
+- `modern_alerts.complete`, with an optional `completed_at` for "I did this yesterday";
+- scanning one of the task's NFC tags;
+- a legacy action ID: a plain mobile action string, such as one used by an older automation, so existing notifications and shortcuts keep working while you migrate.
+
+A back-dated completion counts the interval from that time. If that already puts the next due date in the past, the task becomes due again immediately.
+
+### Task entities
+
+Besides the usual status sensor, problem sensor, and buttons, each task has:
+
+| Entity | Value |
+| --- | --- |
+| Next due | Timestamp of the next due time. It stays at the due time while the task is overdue. Attributes: `last_completed`, `completed_by`, `mode`, `interval` (minutes), `rrule`, `window_end`, `days_remaining`, `upcoming`, `due`, `missed`. |
+| Days remaining | Whole calendar days until due; negative when overdue. Suits gauge cards. |
+| Done | Button that completes the task. |
+
+Entity IDs take the task name once, for example `sensor.ro_filter_next_due`. A dashboard can list every task by filtering on the `modern_alerts` integration and the `*_next_due` sensors.
+
+### Restarts and edits
+
+The next due date, last completion, and missed count are always saved, whether or not **Restore incidents** is enabled. If Home Assistant was off when a task fell due, it becomes due at startup. Windows that opened and closed while it was off are counted as missed. With **Restore incidents** off, a task that is due at startup starts a new incident and notifies again.
+
+Editing the interval, rule, time of day, or window recomputes the next due date from the last completion. A task that has never been completed uses **First due** if set, otherwise the present. History is kept. If the edit moves the due date into the future while the task is due, the reminders stop without a resolution message.
+
+### Importing existing reminders
+
+`modern_alerts.import_task` creates a task from values you already have, so a due date kept in a helper carries over exactly. It is restricted to administrators.
+
+```yaml
+action: modern_alerts.import_task
+data:
+  name: RO filter
+  mode: after_completion
+  interval:
+    days: 180
+  next_due: "{{ states('input_datetime.ro_filter_change') }}"
+  tags:
+    - 0a1b2c3d-example-tag-id
+  legacy_actions:
+    - rocomplete
+  notifiers:
+    - mobile_app_phone
+  message: Change the RO filter
+  action_buttons: true
+```
+
+Other fields are `rrule`, `time`, `window`, `last_completed`, `lead_days`, `notify_entities`, `repeat`, `title`, and `done_message`. Everything else can be edited afterwards from the entry's options. Remove the old automation before relying on the task, or both will notify.
 
 ## Duplicate and import
 
@@ -98,7 +172,7 @@ Disable the corresponding legacy alert before enabling the replacement to avoid 
 
 ## Actions
 
-Actions target the alert's status sensor. Entity IDs can vary after naming changes, so use the ID shown on the alert device.
+Actions target the alert's status sensor. Targeting the whole device also works: only the status sensor acts, so the action is applied once. Entity IDs can vary after naming changes, so use the ID shown on the alert device.
 
 | Action | Use |
 | --- | --- |
@@ -111,6 +185,8 @@ Actions target the alert's status sensor. Entity IDs can vary after naming chang
 | `modern_alerts.test_output` | Run one configured output. |
 | `modern_alerts.stop_outputs` | Stop active effects and clean them up. |
 | `modern_alerts.clear_history` | Clear recent metadata without changing the incident. |
+| `modern_alerts.complete` | Mark a recurring task done, optionally with `completed_at`. |
+| `modern_alerts.import_task` | Create a recurring task from existing values. Administrators only; takes no target. |
 
 Example:
 

@@ -1,8 +1,8 @@
 # Modern Alerts
 
-Modern Alerts is a Home Assistant integration for repeating alerts. You set it up and edit it from **Settings → Devices & services**. Each alert provides a status sensor, a problem binary sensor, and controls for acknowledgement, snoozing, resuming, and notification tests.
+Modern Alerts is a Home Assistant integration for repeating alerts. You set it up and edit it from **Settings → Devices & services**. Each alert provides a status sensor, a problem binary sensor, and controls for acknowledgement, snoozing, resuming, and notification tests. An alert can watch an entity, or it can be a recurring task that keeps its own schedule, such as a filter change or taking out the garbage.
 
-**Version 0.5.0 targets Home Assistant 2026.9.2 (Python 3.14).** Earlier versions are not supported. This integration uses its own `modern_alerts` actions and standard entities, so existing `alert.*` references need migration.
+**Version 0.6.0 targets Home Assistant 2026.9.2 (Python 3.14).** Earlier versions are not supported. This integration uses its own `modern_alerts` actions and standard entities, so existing `alert.*` references need migration.
 
 ## Install
 
@@ -52,7 +52,17 @@ For example, a garage-door alert can watch `binary_sensor.garage_door` for `on`,
 
 Open an alert's device under Modern Alerts to find its status sensor, problem sensor, buttons, output selector, and test controls. The status sensor is `idle` when there is no incident, `on` while an incident is active, and `off` after acknowledgement. Add these entities to dashboards with the standard Home Assistant cards.
 
-Acknowledgement silences the current incident. Snooze pauses delivery for a chosen period, while Resume clears acknowledgement and snooze and follows the existing schedule. The alert continues monitoring its source until you disable or delete the configuration entry.
+Acknowledgement silences the current incident. Snooze pauses delivery for a chosen period and sends a reminder when it ends, while Resume clears acknowledgement and snooze and follows the existing schedule. The alert continues monitoring its source until you disable or delete the configuration entry.
+
+### Recurring tasks
+
+In the first setup step, choose **Recurring task** instead of watching an entity. A task is due on a schedule that Modern Alerts keeps itself, with no helpers or template sensors:
+
+- **After completion**: due a set interval after it was last done, at a time of day you choose. Use this for filters and services.
+- **Fixed schedule**: due on a calendar rule such as every Tuesday at 17:00, optionally for a limited window. A window that passes without completion is recorded as missed.
+- **Once**: a single reminder.
+
+A due task behaves like any other alert, with one addition: **Done**. Acknowledging stops the reminders but leaves the task due; only Done completes it and schedules the next one. Done is available as a button, a phone action, the `modern_alerts.complete` action, an NFC tag scan, or an existing mobile action ID. Each task adds a **Next due** timestamp sensor and a **Days remaining** sensor. See [Recurring tasks](docs.md#recurring-tasks) for details.
 
 The sidebar overview shows active alerts, recent history, current stages, pending transitions, and delivery blockers. Administrators can use **Explain delivery** to see why a notification or output is waiting. See [docs.md](docs.md) for the complete behavior reference, migration guide, outputs, policies, and actions.
 

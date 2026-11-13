@@ -5,7 +5,7 @@
 Modern Alerts is a custom Home Assistant integration that reproduces the built-in
 Alert lifecycle and adds acknowledgement, snooze, actionable notifications,
 device outputs, escalation, routing policies, reusable profiles, compound
-conditions, schedules, import, and an overview panel. The integration domain is
+conditions, schedules, recurring tasks, import, and an overview panel. The integration domain is
 `modern_alerts`. Read `README.md` for user-facing behavior and installation.
 
 ## Code map
@@ -13,8 +13,11 @@ conditions, schedules, import, and an overview panel. The integration domain is
 All runtime integration code lives in `custom_components/modern_alerts/`:
 
 - `__init__.py`: config-entry lifecycle, services, platform setup, and panel startup.
-- `runtime.py`: incident state, transitions, timers, restoration, delivery routing,
+- `runtime.py`: incident state, transitions, timers, delivery routing,
   acknowledgement, snooze, escalation, and history.
+- `persistence.py`: incident snapshot and validated restoration (runtime mixin).
+- `tasks.py`, `schedule.py`: recurring-task state and completion (runtime mixin),
+  and pure schedule maths in Home Assistant's timezone.
 - `models.py`: validated, serializable configuration.
 - `config_flow.py`, `output_flow.py`, `policy_flow.py`: native setup and options UI.
 - `notifications.py`, `grouping.py`: notification rendering and grouped delivery.
@@ -31,6 +34,10 @@ All runtime integration code lives in `custom_components/modern_alerts/`:
 ## Behavior to preserve
 
 - Keep acknowledgement, snooze, resolution, and incident reset semantics distinct.
+- Keep task completion distinct from acknowledgement: only completion ends a due
+  task. Task schedule state persists regardless of the restore-state option.
+- Entity-watching alerts and profiles must behave identically whether or not
+  task code exists; migration only adds `source: entity`.
 - Never send stale notifications or outputs after acknowledgement, resolution,
   cancellation, configuration replacement, or an incident generation change.
 - Preserve restored deadlines, incident identity, action-token validation, and
