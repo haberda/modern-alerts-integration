@@ -4,11 +4,11 @@ This page covers the parts of Modern Alerts that are useful once the basic setup
 
 ## HACS publishing
 
-The repository is developed on `git.haber.haus` and mirrored publicly on GitHub. HACS only reads GitHub repositories, so add the mirror in HACS under **Custom repositories** with the **Integration** category. The GitHub workflows run on the mirror.
+Add the GitHub repository in HACS under **Custom repositories** with the **Integration** category.
 
-The root `hacs.json` uses the README as the HACS description. The integration manifest names `@haberda` as code owner and points documentation and issues at `git.haber.haus`, the primary host. On the mirror, a repository description with topics such as `home-assistant`, `hacs`, and `alerts` helps HACS present it.
+The root `hacs.json` uses the README as the HACS description. The integration manifest names `@haberda` as code owner. A repository description with topics such as `home-assistant`, `hacs`, and `alerts` helps HACS present it.
 
-A second workflow runs the linter and the full test suite on every push and pull request. The HACS workflow runs on pushes, pull requests, releases, manual requests, and a weekly schedule. Home Assistant Brands registration is separate; add `modern_alerts` to the Brands repository before submitting the integration for broader distribution. Publish a release on the GitHub mirror with a tag matching the manifest version, currently `0.6.0`, or HACS will use the default branch.
+A second workflow runs the linter and the full test suite on every push and pull request. The HACS workflow runs on pushes, pull requests, releases, manual requests, and a weekly schedule. Home Assistant Brands registration is separate; add `modern_alerts` to the Brands repository before submitting the integration for broader distribution. Publish a GitHub release with a tag matching the manifest version, currently `0.6.0`, or HACS will use the default branch.
 
 ## Alert lifecycle
 

@@ -18,14 +18,14 @@ Modern Alerts is a Home Assistant integration for repeating alerts. You set it u
 3. Set up your notification provider if you want notifications. State-only alerts are also supported.
 4. Open **Settings → Devices & services → Add integration → Modern Alerts**.
 
-This is a custom integration. Once it is installed, you can create and edit alerts without changing configuration files. HACS installation is supported through the public GitHub mirror of this repository.
+This is a custom integration. Once it is installed, you can create and edit alerts without changing configuration files. HACS installation is supported from the GitHub repository.
 
 ## Install with HACS
 
-This repository is developed on `git.haber.haus` and mirrored publicly on GitHub. HACS only reads GitHub repositories, so add the mirror:
+Add the GitHub repository to HACS as a custom repository:
 
 1. Open **HACS → ⋮ → Custom repositories**.
-2. Enter the GitHub mirror's URL and choose **Integration**.
+2. Enter the GitHub repository URL and choose **Integration**.
 3. Find **Modern Alerts** in HACS and download it.
 4. Restart Home Assistant.
 5. Open **Settings → Devices & services → Add integration → Modern Alerts**.
