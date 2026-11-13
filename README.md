@@ -25,7 +25,7 @@ This is a custom integration. Once it is installed, you can create and edit aler
 Add the GitHub repository to HACS as a custom repository:
 
 1. Open **HACS → ⋮ → Custom repositories**.
-2. Enter the GitHub repository URL and choose **Integration**.
+2. Enter `https://github.com/haberda/modern-alerts-integration` and choose **Integration**.
 3. Find **Modern Alerts** in HACS and download it.
 4. Restart Home Assistant.
 5. Open **Settings → Devices & services → Add integration → Modern Alerts**.

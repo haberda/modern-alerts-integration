@@ -4,7 +4,7 @@ This page covers the parts of Modern Alerts that are useful once the basic setup
 
 ## HACS publishing
 
-Add the GitHub repository in HACS under **Custom repositories** with the **Integration** category.
+Add the [GitHub repository](https://github.com/haberda/modern-alerts-integration) in HACS under **Custom repositories** with the **Integration** category.
 
 The root `hacs.json` uses the README as the HACS description. The integration manifest names `@haberda` as code owner. A repository description with topics such as `home-assistant`, `hacs`, and `alerts` helps HACS present it.
 

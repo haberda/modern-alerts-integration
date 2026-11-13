@@ -11,10 +11,10 @@
     "http",
     "websocket_api"
   ],
-  "documentation": "https://git.haber.haus/haberda/alerts-integration",
+  "documentation": "https://github.com/haberda/modern-alerts-integration",
   "integration_type": "service",
   "iot_class": "local_push",
-  "issue_tracker": "https://git.haber.haus/haberda/alerts-integration/issues",
+  "issue_tracker": "https://github.com/haberda/modern-alerts-integration/issues",
   "requirements": [],
   "version": "0.6.0"
 }
