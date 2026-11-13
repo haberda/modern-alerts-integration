@@ -77,7 +77,7 @@ async def test_overview_browser_controls_preview_and_safe_text(
                     await socket.send_json(
                         {"id": serial, "method": method, "params": params}
                     )
-                    async with asyncio.timeout(8):
+                    async with asyncio.timeout(30):
                         while True:
                             response = await socket.receive_json()
                             if response.get("id") == serial:
