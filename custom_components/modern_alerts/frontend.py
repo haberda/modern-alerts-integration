@@ -8,6 +8,7 @@ from homeassistant.components import frontend, websocket_api
 from homeassistant.components.http import StaticPathConfig
 from homeassistant.components.panel_custom import async_register_panel
 from homeassistant.core import callback
+from homeassistant.loader import async_get_integration
 
 from .const import DOMAIN
 from .preview import explain
@@ -30,13 +31,15 @@ async def async_setup_frontend(hass):
 
 async def async_ensure_panel(hass):
     if DOMAIN not in hass.data.get("frontend_panels", {}):
+        # The manifest is the single source of the cache-busting version.
+        integration = await async_get_integration(hass, DOMAIN)
         await async_register_panel(
             hass,
             frontend_url_path=DOMAIN,
             webcomponent_name="modern-alerts-overview",
             sidebar_title="Modern Alerts",
             sidebar_icon="mdi:bell-alert",
-            module_url=URL + "?v=0.5.0",
+            module_url=f"{URL}?v={integration.version}",
         )
 
 

@@ -17,7 +17,7 @@ def explain(runtime, *, render=False):
     if runtime._stopped:
         blockers.append("not_running")
     if not runtime.firing:
-        blockers.append("condition_inactive")
+        blockers.append("task_not_due" if runtime.is_task else "condition_inactive")
     if runtime.acknowledged:
         blockers.append("acknowledged")
     if runtime.snoozed_until:
@@ -110,6 +110,18 @@ def explain(runtime, *, render=False):
             ),
         },
         "history": deepcopy(runtime.history),
+        "task": {
+            "mode": config.task_mode,
+            "next_due": runtime.next_due,
+            "window_end": runtime.window_end,
+            "last_completed": runtime.last_completed,
+            "days_remaining": runtime.days_remaining,
+            "upcoming": runtime.upcoming,
+            "missed": runtime.missed,
+            "done": runtime.task_done,
+        }
+        if runtime.is_task
+        else None,
     }
     if render:
         result["preview"] = {}

@@ -17,7 +17,8 @@
           "kind": "Create an alert or a reusable profile",
           "conditions": "Compound rules (optional)",
           "condition_mode": "Combine compound rules",
-          "setup_action": "Start with a new alert, copy, or YAML import"
+          "setup_action": "Start with a new alert, copy, or YAML import",
+          "source": "What starts the alert"
         },
         "data_description": {
           "state": "Underlying state string, such as on or open. Ignored when a numeric problem threshold is set.",
@@ -28,7 +29,8 @@
           "numeric_unit": "Exact unit attribute, for example %, °C, or °F. A missing or different unit suspends evaluation. Empty accepts the source's current units.",
           "entity_id": "Primary source for existing templates. Optional with compound rules; defaults to their first entity. Profiles do not watch a source.",
           "conditions": "Up to 20 rules. Empty uses the single watched entity. Unknown inputs follow the unavailable-source policy when known rules cannot determine the result.",
-          "setup_action": "To duplicate or import, select it and continue; leave the other fields empty."
+          "setup_action": "To duplicate or import, select it and continue; leave the other fields empty.",
+          "source": "Watch an entity, or let Modern Alerts keep a schedule for a recurring task such as a filter change. A task ignores the entity and threshold fields on this form."
         }
       },
       "timing": {
@@ -56,10 +58,10 @@
           "restore_state": "Save acknowledgement, snooze, incident identity and deadlines. After source readiness, send at most one overdue reminder and resume the schedule. Off starts fresh after reload.",
           "activation_delay": "Require the problem to remain true for this long before creating an incident. Zero starts immediately. The first repeat interval begins after this delay.",
           "recovery_delay": "Require the recovery condition to remain true for this long before resolving. Reminders continue during this delay.",
-          "unavailable_policy": "Resolve treats a nonmatching unknown/unavailable state as clear. Suspend preserves the incident and pauses reminders until usable data returns. Invalid numeric values always suspend.",
-          "enable_snooze": "Allow the Snooze button and action. Snooze is separate from acknowledgement; reminders continue advancing silently.",
+          "unavailable_policy": "Resolve treats a nonmatching unknown/unavailable state as clear. Suspend preserves the incident and pauses reminders until usable data returns. Invalid numeric values always suspend. Single-entity numeric alerts always pause on an unknown, unavailable, or non-numeric value, whichever option is chosen, so a flaky sensor cannot report a false recovery.",
+          "enable_snooze": "Allow the Snooze button and action. Snooze is separate from acknowledgement. A reminder is sent when the snooze ends, and the repeat interval restarts from then.",
           "snooze_minutes": "Used by the device and phone buttons, and by the snooze action when no duration is supplied. Maximum one week.",
-          "action_buttons": "Add incident-specific Acknowledge, Snooze, and Open alert controls to direct mobile_app notify actions. Test and resolution messages have no generated controls. Automatic controls replace any actions in extra data for these destinations.",
+          "action_buttons": "Add incident-specific Acknowledge, Snooze, and Open alert (and Done for recurring tasks) controls to direct mobile_app notify actions. Test and resolution messages have no generated controls. Automatic controls replace any actions in extra data for these destinations.",
           "resolution_after_ack": "Off suppresses resolution messages and recovery outputs when the incident is acknowledged. Cleanup still runs. Snooze does not suppress resolution.",
           "configure_delivery": "Open advanced delivery settings after Content. Leaving this off preserves existing settings."
         }
@@ -98,7 +100,7 @@
       },
       "review": {
         "title": "Review alert",
-        "description": "**{name}**\n\nWatch `{entity}` for `{state}`. Current source state and unit: `{current}`. Recovery: {recovery}.\n\nFirst notification after activation: {first}. Repeat delays in minutes: {schedule}; the final delay repeats indefinitely.\n\n{reliability}\n\nDestinations: {destinations}\n\nResolution: {completion}\n\n{delivery_summary}\n\nSubmit to save. No test notification is sent automatically. Startup evaluation or restored overdue reminders may send a real alert. Use the Test notification button on the alert device to test explicitly."
+        "description": "**{name}**\n\n{summary}\n\nFirst notification after activation: {first}. Repeat delays in minutes: {schedule}; the final delay repeats indefinitely.\n\n{reliability}\n\nDestinations: {destinations}\n\nResolution: {completion}\n\n{delivery_summary}\n\nSubmit to save. No test notification is sent automatically. Startup evaluation or restored overdue reminders may send a real alert. Use the Test notification button on the alert device to test explicitly."
       },
       "outputs": {
         "title": "Alert outputs",
@@ -235,6 +237,32 @@
         "data": {
           "source": "Alert definition"
         }
+      },
+      "task": {
+        "title": "Recurring task",
+        "description": "Choose when the task becomes due and how it can be marked done. Reminders, acknowledgement, snooze, and outputs are set on the following forms and work as they do for other alerts. Acknowledging only stops the reminders; the task stays due until it is completed.",
+        "data": {
+          "task_mode": "Schedule type",
+          "task_interval": "Interval",
+          "task_time": "Time of day",
+          "task_rrule": "Recurrence rule (RRULE)",
+          "task_window": "Window length",
+          "task_first_due": "First due",
+          "task_lead_days": "Lead time (days)",
+          "task_tags": "NFC tag IDs",
+          "task_legacy_actions": "Legacy phone action IDs"
+        },
+        "data_description": {
+          "task_mode": "After completion counts the interval from when the task was last done. Fixed schedule follows a calendar rule. Once is a single reminder.",
+          "task_interval": "After completion only. Intervals of a day or longer fall due at the time of day below; shorter intervals are exact.",
+          "task_time": "The hour a task becomes due. For a fixed schedule this is when each occurrence starts, unless First due is set. Defaults to 12:00.",
+          "task_rrule": "Fixed schedule only. An iCalendar rule such as FREQ=WEEKLY;BYDAY=TU or FREQ=MONTHLY;BYMONTHDAY=1. Daily, weekly, monthly, and yearly rules are supported.",
+          "task_window": "Fixed schedule only. The task is due from each start until it is completed or this much time has passed; an unanswered window is recorded as missed and reminders stop. Empty keeps the task due until completed.",
+          "task_first_due": "Required for Once. Otherwise optional: seeds the first due date, and anchors rules such as every second week. Empty starts one interval from now, or at the next occurrence.",
+          "task_lead_days": "Mark the task as upcoming this many days before it is due. This only sets an attribute; no notification is sent early.",
+          "task_tags": "Scanning any of these tags completes the task. Copy the tag ID from Settings > Tags.",
+          "task_legacy_actions": "Plain mobile action IDs that also complete the task, so existing notifications and shortcuts keep working during a migration."
+        }
       }
     },
     "error": {
@@ -254,14 +282,37 @@
       "invalid_actions": "Enter a valid Home Assistant action sequence. Check device actions, templates, and required fields.",
       "invalid_conditions": "Check the rule entities, comparisons, and values.",
       "invalid_import": "Invalid legacy Alert YAML. Paste only alert definitions, expand secrets/includes, and remove aliases or unsupported fields.",
-      "invalid_source": "Choose an existing entry."
+      "invalid_source": "Choose an existing entry.",
+      "invalid_task": "Check the task settings: choose a schedule type, a valid time and date, a lead time of 0 to 365 days, and at most 20 tags and action IDs. Profiles cannot be recurring tasks.",
+      "task_interval_required": "Enter an interval of at least one minute and at most ten years.",
+      "task_due_required": "Enter the date and time this one-off task is due.",
+      "invalid_rrule": "Enter one iCalendar RRULE with a daily, weekly, monthly, or yearly frequency, for example FREQ=WEEKLY;BYDAY=TU."
+    },
+    "abort": {
+      "invalid_name": "The task could not be imported: check its name.",
+      "invalid_task_mode": "The task could not be imported: check its mode.",
+      "invalid_task_interval": "The task could not be imported: check its interval.",
+      "invalid_task_rrule": "The task could not be imported: check its recurrence rule.",
+      "invalid_task_first_due": "The task could not be imported: check its next due date.",
+      "invalid_task_window": "The task could not be imported: check its window.",
+      "invalid_task_time": "The task could not be imported: check its time.",
+      "invalid_task_tags": "The task could not be imported: check its tags.",
+      "invalid_task_legacy_actions": "The task could not be imported: check its legacy action IDs.",
+      "invalid_notifiers": "The task could not be imported: check its notify actions.",
+      "invalid_notify_entities": "The task could not be imported: check its notify entities.",
+      "invalid_repeat": "The task could not be imported: check its repeat intervals.",
+      "invalid_message": "The task could not be imported: check its message template.",
+      "invalid_title": "The task could not be imported: check its title template.",
+      "invalid_done_message": "The task could not be imported: check its resolution template.",
+      "invalid_task_lead_days": "The task could not be imported: check its lead time.",
+      "invalid_source": "The task could not be imported: check its settings."
     }
   },
   "options": {
     "step": {
       "init": {
         "title": "Alert condition",
-        "description": "Watch an exact state or numeric threshold, or add compound rules. Compound rules replace single-source matching and use ALL (AND) or ANY (OR). Numeric compound comparisons use raw source units and have no hysteresis. Profiles contain only shared delivery destinations and outputs.",
+        "description": "Watch an exact state or numeric threshold, or add compound rules. Compound rules replace single-source matching and use ALL (AND) or ANY (OR). Numeric compound comparisons use raw source units and have no hysteresis. Profiles contain only shared delivery destinations and outputs. A recurring task shows only its name here; its schedule is on the next form.",
         "data": {
           "name": "Alert name",
           "entity_id": "Entity to watch",
@@ -311,10 +362,10 @@
           "restore_state": "Save acknowledgement, snooze, incident identity and deadlines. After source readiness, send at most one overdue reminder and resume the schedule. Off starts fresh after reload.",
           "activation_delay": "Require the problem to remain true for this long before creating an incident. Zero starts immediately. The first repeat interval begins after this delay.",
           "recovery_delay": "Require the recovery condition to remain true for this long before resolving. Reminders continue during this delay.",
-          "unavailable_policy": "Resolve treats a nonmatching unknown/unavailable state as clear. Suspend preserves the incident and pauses reminders until usable data returns. Invalid numeric values always suspend.",
-          "enable_snooze": "Allow the Snooze button and action. Snooze is separate from acknowledgement; reminders continue advancing silently.",
+          "unavailable_policy": "Resolve treats a nonmatching unknown/unavailable state as clear. Suspend preserves the incident and pauses reminders until usable data returns. Invalid numeric values always suspend. Single-entity numeric alerts always pause on an unknown, unavailable, or non-numeric value, whichever option is chosen, so a flaky sensor cannot report a false recovery.",
+          "enable_snooze": "Allow the Snooze button and action. Snooze is separate from acknowledgement. A reminder is sent when the snooze ends, and the repeat interval restarts from then.",
           "snooze_minutes": "Used by the device and phone buttons, and by the snooze action when no duration is supplied. Maximum one week.",
-          "action_buttons": "Add incident-specific Acknowledge, Snooze, and Open alert controls to direct mobile_app notify actions. Test and resolution messages have no generated controls. Automatic controls replace any actions in extra data for these destinations.",
+          "action_buttons": "Add incident-specific Acknowledge, Snooze, and Open alert (and Done for recurring tasks) controls to direct mobile_app notify actions. Test and resolution messages have no generated controls. Automatic controls replace any actions in extra data for these destinations.",
           "resolution_after_ack": "Off suppresses resolution messages and recovery outputs when the incident is acknowledged. Cleanup still runs. Snooze does not suppress resolution.",
           "configure_delivery": "Open advanced delivery settings after Content. Leaving this off preserves existing settings."
         }
@@ -353,7 +404,7 @@
       },
       "review": {
         "title": "Review alert",
-        "description": "**{name}**\n\nWatch `{entity}` for `{state}`. Current source state and unit: `{current}`. Recovery: {recovery}.\n\nFirst notification after activation: {first}. Repeat delays in minutes: {schedule}; the final delay repeats indefinitely.\n\n{reliability}\n\nDestinations: {destinations}\n\nResolution: {completion}\n\n{delivery_summary}\n\nSubmit to save. No test notification is sent automatically. Startup evaluation or restored overdue reminders may send a real alert. Use the Test notification button on the alert device to test explicitly."
+        "description": "**{name}**\n\n{summary}\n\nFirst notification after activation: {first}. Repeat delays in minutes: {schedule}; the final delay repeats indefinitely.\n\n{reliability}\n\nDestinations: {destinations}\n\nResolution: {completion}\n\n{delivery_summary}\n\nSubmit to save. No test notification is sent automatically. Startup evaluation or restored overdue reminders may send a real alert. Use the Test notification button on the alert device to test explicitly."
       },
       "outputs": {
         "title": "Alert outputs",
@@ -469,6 +520,32 @@
       "profile_review": {
         "title": "Review reusable profile",
         "description": "**{name}**\n\nNotification destinations: {destinations}\n\nDevice outputs: {outputs}\n\nSave this profile, then select it in the Destinations step of one or more alerts. It has no watched entity and sends nothing on its own. Editing it affects all referencing alerts."
+      },
+      "task": {
+        "title": "Recurring task",
+        "description": "Choose when the task becomes due and how it can be marked done. Reminders, acknowledgement, snooze, and outputs are set on the following forms and work as they do for other alerts. Acknowledging only stops the reminders; the task stays due until it is completed.",
+        "data": {
+          "task_mode": "Schedule type",
+          "task_interval": "Interval",
+          "task_time": "Time of day",
+          "task_rrule": "Recurrence rule (RRULE)",
+          "task_window": "Window length",
+          "task_first_due": "First due",
+          "task_lead_days": "Lead time (days)",
+          "task_tags": "NFC tag IDs",
+          "task_legacy_actions": "Legacy phone action IDs"
+        },
+        "data_description": {
+          "task_mode": "After completion counts the interval from when the task was last done. Fixed schedule follows a calendar rule. Once is a single reminder.",
+          "task_interval": "After completion only. Intervals of a day or longer fall due at the time of day below; shorter intervals are exact.",
+          "task_time": "The hour a task becomes due. For a fixed schedule this is when each occurrence starts, unless First due is set. Defaults to 12:00.",
+          "task_rrule": "Fixed schedule only. An iCalendar rule such as FREQ=WEEKLY;BYDAY=TU or FREQ=MONTHLY;BYMONTHDAY=1. Daily, weekly, monthly, and yearly rules are supported.",
+          "task_window": "Fixed schedule only. The task is due from each start until it is completed or this much time has passed; an unanswered window is recorded as missed and reminders stop. Empty keeps the task due until completed.",
+          "task_first_due": "Required for Once. Otherwise optional: seeds the first due date, and anchors rules such as every second week. Empty starts one interval from now, or at the next occurrence.",
+          "task_lead_days": "Mark the task as upcoming this many days before it is due. This only sets an attribute; no notification is sent early.",
+          "task_tags": "Scanning any of these tags completes the task. Copy the tag ID from Settings > Tags.",
+          "task_legacy_actions": "Plain mobile action IDs that also complete the task, so existing notifications and shortcuts keep working during a migration."
+        }
       }
     },
     "error": {
@@ -488,7 +565,11 @@
       "invalid_actions": "Enter a valid Home Assistant action sequence. Check device actions, templates, and required fields.",
       "invalid_conditions": "Check the rule entities, comparisons, and values.",
       "invalid_import": "Invalid legacy Alert YAML. Paste only alert definitions, expand secrets/includes, and remove aliases or unsupported fields.",
-      "invalid_source": "Choose an existing entry."
+      "invalid_source": "Choose an existing entry.",
+      "invalid_task": "Check the task settings: choose a schedule type, a valid time and date, a lead time of 0 to 365 days, and at most 20 tags and action IDs. Profiles cannot be recurring tasks.",
+      "task_interval_required": "Enter an interval of at least one minute and at most ten years.",
+      "task_due_required": "Enter the date and time this one-off task is due.",
+      "invalid_rrule": "Enter one iCalendar RRULE with a daily, weekly, monthly, or yearly frequency, for example FREQ=WEEKLY;BYDAY=TU."
     }
   },
   "entity": {
@@ -500,6 +581,12 @@
           "on": "Active",
           "off": "Acknowledged"
         }
+      },
+      "next_due": {
+        "name": "Next due"
+      },
+      "days_remaining": {
+        "name": "Days remaining"
       }
     },
     "binary_sensor": {
@@ -528,6 +615,9 @@
       },
       "stop_outputs": {
         "name": "Stop outputs"
+      },
+      "complete": {
+        "name": "Done"
       }
     },
     "select": {
@@ -563,7 +653,7 @@
     },
     "snooze": {
       "name": "Snooze",
-      "description": "Silence reminders temporarily without clearing acknowledgement. Omit minutes to use the alert default.",
+      "description": "Silence reminders temporarily without clearing acknowledgement. A reminder is sent when the snooze ends. Omit minutes to use the alert default.",
       "fields": {
         "minutes": {
           "name": "Minutes",
@@ -592,6 +682,94 @@
     "clear_history": {
       "name": "Clear incident history",
       "description": "Delete this alert’s recent metadata history without changing the active incident or notification schedule."
+    },
+    "complete": {
+      "name": "Complete task",
+      "description": "Mark a recurring task done. Resolves the current reminder and schedules the next due date. Acknowledging does not do this.",
+      "fields": {
+        "completed_at": {
+          "name": "Completed at",
+          "description": "Optional earlier time the task was actually done, for example yesterday. Interval tasks count from this time."
+        }
+      }
+    },
+    "import_task": {
+      "name": "Import recurring task",
+      "description": "Create a recurring task from existing values, so a current due date carries over exactly. Administrators only.",
+      "fields": {
+        "name": {
+          "name": "Name",
+          "description": "Task name."
+        },
+        "mode": {
+          "name": "Mode",
+          "description": "after_completion, fixed, or once."
+        },
+        "interval": {
+          "name": "Interval",
+          "description": "For after_completion: time between completions."
+        },
+        "rrule": {
+          "name": "Recurrence rule",
+          "description": "For fixed: an iCalendar RRULE."
+        },
+        "time": {
+          "name": "Time of day",
+          "description": "When the task becomes due on its day. Defaults to 12:00."
+        },
+        "window": {
+          "name": "Window",
+          "description": "For fixed: how long each occurrence stays due."
+        },
+        "next_due": {
+          "name": "Next due",
+          "description": "The date and time the task is next due."
+        },
+        "last_completed": {
+          "name": "Last completed",
+          "description": "When the task was last done."
+        },
+        "lead_days": {
+          "name": "Lead days",
+          "description": "Days before due to mark the task as upcoming."
+        },
+        "tags": {
+          "name": "Tag IDs",
+          "description": "NFC tags that complete the task."
+        },
+        "legacy_actions": {
+          "name": "Legacy action IDs",
+          "description": "Plain mobile action IDs that complete the task."
+        },
+        "notifiers": {
+          "name": "Notify actions",
+          "description": "Legacy notify action names, such as mobile_app_phone."
+        },
+        "notify_entities": {
+          "name": "Notify entities",
+          "description": "Notify entities to message."
+        },
+        "repeat": {
+          "name": "Repeat intervals",
+          "description": "Minutes between reminders while the task is due."
+        },
+        "message": {
+          "name": "Message",
+          "description": "Reminder message template."
+        },
+        "title": {
+          "name": "Title",
+          "description": "Notification title template."
+        },
+        "done_message": {
+          "name": "Done message",
+          "description": "Message sent when the task is completed."
+        },
+        "action_buttons": {
+          "name": "Phone controls",
+          "description": "Add Done, Acknowledge, and Snooze controls to Companion notifications."
+        }
+      }
     }
   },
   "selector": {
@@ -633,6 +811,19 @@
         "new": "New alert or profile",
         "duplicate": "Duplicate an existing entry",
         "import_yaml": "Import legacy Alert YAML"
+      }
+    },
+    "alert_source": {
+      "options": {
+        "entity": "Watch an entity",
+        "schedule": "Recurring task (schedule)"
+      }
+    },
+    "task_mode": {
+      "options": {
+        "after_completion": "After completion (interval)",
+        "fixed": "Fixed schedule (RRULE)",
+        "once": "Once"
       }
     }
   }

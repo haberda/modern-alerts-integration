@@ -18,6 +18,105 @@ from .conditions import validate_conditions
 from .const import MIN_REPEAT
 from .output_config import InvalidOutput, validate_outputs
 from .policies import InvalidPolicy, validate_policy, validate_stages
+from .schedule import (
+    DEFAULT_TIME,
+    MODES,
+    TASK_ENTITY,
+    local_text,
+    normalize_rrule,
+    parse_local,
+)
+
+MAX_TASK_MINUTES = 5_256_000  # Ten years.
+
+
+def _minutes(value, *, minimum: float, maximum: float = MAX_TASK_MINUTES) -> float:
+    """Accept minutes or a Home Assistant duration mapping."""
+    if isinstance(value, bool):
+        raise ValueError
+    if isinstance(value, Mapping):
+        value = cv.time_period(dict(value)).total_seconds() / 60
+    value = float(value)
+    if not isfinite(value) or not minimum <= value <= maximum:
+        raise ValueError
+    return value
+
+
+def _task_fields(values: Mapping[str, Any]) -> dict[str, Any]:
+    """Validate the schedule of a recurring task."""
+    mode = values.get("task_mode", "after_completion")
+    if mode not in MODES:
+        raise InvalidConfig("task_mode", "invalid_task")
+    result: dict[str, Any] = {"source": "schedule", "task_mode": mode}
+
+    clock = values.get("task_time") or DEFAULT_TIME
+    parsed = dt_util.parse_time(clock) if isinstance(clock, str) else None
+    if parsed is None:
+        raise InvalidConfig("task_time", "invalid_task")
+    result["task_time"] = parsed.replace(microsecond=0).isoformat()
+
+    first = values.get("task_first_due") or None
+    if first is not None:
+        moment = parse_local(first) if isinstance(first, str) else None
+        if moment is None:
+            raise InvalidConfig("task_first_due", "invalid_task")
+        first = local_text(moment)
+    if mode == "once" and first is None:
+        raise InvalidConfig("task_first_due", "task_due_required")
+    result["task_first_due"] = first
+
+    interval = values.get("task_interval") or None
+    if mode == "after_completion":
+        try:
+            interval = _minutes(interval, minimum=1)
+        except (TypeError, ValueError, vol.Invalid) as err:
+            raise InvalidConfig("task_interval", "task_interval_required") from err
+    else:
+        interval = None
+    result["task_interval"] = interval
+
+    rule = values.get("task_rrule") or None
+    length = values.get("task_window") or None
+    if mode == "fixed":
+        try:
+            rule = normalize_rrule(rule)
+        except Exception as err:  # dateutil raises several unrelated types.
+            raise InvalidConfig("task_rrule", "invalid_rrule") from err
+        if length is not None:
+            try:
+                length = _minutes(length, minimum=1, maximum=525_600)
+            except (TypeError, ValueError, vol.Invalid) as err:
+                raise InvalidConfig("task_window", "invalid_task") from err
+    else:
+        rule = length = None
+    result["task_rrule"] = rule
+    result["task_window"] = length
+
+    try:
+        lead = values.get("task_lead_days") or 0
+        if isinstance(lead, bool):
+            raise ValueError
+        lead = float(lead)
+        if not isfinite(lead) or not 0 <= lead <= 365:
+            raise ValueError
+    except (TypeError, ValueError) as err:
+        raise InvalidConfig("task_lead_days", "invalid_task") from err
+    result["task_lead_days"] = lead
+
+    for key in ("task_tags", "task_legacy_actions"):
+        raw = values.get(key) or []
+        if (
+            not isinstance(raw, list | tuple)
+            or len(raw) > 20
+            or any(
+                not isinstance(item, str) or not item.strip() or len(item) > 200
+                for item in raw
+            )
+            or any(item.strip().startswith("MODERN_ALERTS:") for item in raw)
+        ):
+            raise InvalidConfig(key, "invalid_task")
+        result[key] = tuple(dict.fromkeys(item.strip() for item in raw))
+    return result
 
 
 class InvalidConfig(ValueError):
@@ -67,10 +166,46 @@ class AlertConfig:
     history_limit: int = 50
     conditions: tuple[dict[str, Any], ...] = ()
     condition_mode: str = "all"
+    # "entity" watches a condition; "schedule" is a recurring task that the
+    # integration itself decides is due.
+    source: str = "entity"
+    task_mode: str = "after_completion"
+    task_interval: float | None = None  # Minutes.
+    task_time: str = DEFAULT_TIME
+    task_rrule: str | None = None
+    task_window: float | None = None  # Minutes.
+    task_first_due: str | None = None  # Local wall-clock time.
+    task_lead_days: float = 0.0
+    task_tags: tuple[str, ...] = ()
+    task_legacy_actions: tuple[str, ...] = ()
+
+    @property
+    def is_task(self) -> bool:
+        return self.source == "schedule"
 
     @classmethod
     def from_dict(cls, values: Mapping[str, Any], hass: HomeAssistant) -> AlertConfig:
         """Validate saved configuration as well as UI input."""
+        source = values.get("source", "entity")
+        if source not in ("entity", "schedule") or (
+            source == "schedule" and values.get("kind", "alert") != "alert"
+        ):
+            raise InvalidConfig("source", "invalid_task")
+        task: dict[str, Any] = {}
+        if source == "schedule":
+            # A task has no watched entity; the schedule decides when it is due.
+            values = {
+                **values,
+                "entity_id": TASK_ENTITY,
+                "state": "on",
+                "conditions": [],
+                "numeric_below": None,
+                "numeric_above": None,
+                "numeric_recover_above": None,
+                "numeric_recover_below": None,
+                "numeric_unit": None,
+            }
+            task = _task_fields(values)
         for key in ("name", "entity_id", "state"):
             value = values.get(key, "on" if key == "state" else None)
             if not isinstance(value, str) or not value.strip():
@@ -248,6 +383,7 @@ class AlertConfig:
             history_limit=history_limit,
             conditions=conditions,
             condition_mode=condition_mode,
+            **task,
             **flags,
             **templates,
             **lists,
@@ -290,4 +426,14 @@ class AlertConfig:
             "history_limit": self.history_limit,
             "conditions": deepcopy(list(self.conditions)),
             "condition_mode": self.condition_mode,
+            "source": self.source,
+            "task_mode": self.task_mode,
+            "task_interval": self.task_interval,
+            "task_time": self.task_time,
+            "task_rrule": self.task_rrule,
+            "task_window": self.task_window,
+            "task_first_due": self.task_first_due,
+            "task_lead_days": self.task_lead_days,
+            "task_tags": list(self.task_tags),
+            "task_legacy_actions": list(self.task_legacy_actions),
         }

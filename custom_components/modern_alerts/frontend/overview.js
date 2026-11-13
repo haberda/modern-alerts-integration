@@ -1,6 +1,6 @@
 /* Native web component; no build tooling or external dependencies. */
 const labels = {
-  not_running: "Not running", condition_inactive: "Condition inactive",
+  not_running: "Not running", condition_inactive: "Condition inactive", task_not_due: "Task not due",
   acknowledged: "Acknowledged", snoozed: "Snoozed", source_unavailable: "Source unavailable",
   quiet_hours: "Quiet hours", outside_weekly_schedule: "Outside weekly schedule",
   presence: "Presence rule not met", group_or_rate_delay: "Grouping or minimum interval",
@@ -96,7 +96,7 @@ class ModernAlertsOverview extends HTMLElement {
   }
   _status(row) {
     if (!row.loaded) return `Not loaded (${row.state})`;
-    return [row.active ? "Active" : "Idle", row.acknowledged && "Acknowledged", row.snoozed_until && "Snoozed", row.source_suspended && "Source unavailable"].filter(Boolean).join(" · ");
+    return [row.active ? (row.task ? "Due" : "Active") : "Idle", row.acknowledged && "Acknowledged", row.snoozed_until && "Snoozed", row.source_suspended && "Source unavailable"].filter(Boolean).join(" · ");
   }
   _errors(row) {return Object.keys({...row.notification_errors, ...row.output_errors, ...row.policy_errors}).length || row.missing_profiles;}
   renderRows() {
@@ -114,6 +114,11 @@ class ModernAlertsOverview extends HTMLElement {
       el("h2", row.name, card);
       el("p", this._status(row), card).className = "status";
       if (!row.loaded) continue;
+      if (row.task) {
+        const days = row.task.days_remaining;
+        el("p", row.task.done ? "Task finished; delete its entry when no longer needed" : `Next due: ${when(row.task.next_due)}${days === null ? "" : ` (${days} days)`}${row.task.upcoming ? " · Upcoming" : ""}`, card);
+        el("p", `Last completed: ${when(row.task.last_completed)}${row.task.missed ? ` · Missed ${row.task.missed}` : ""}`, card);
+      }
       el("p", `Incident started: ${when(row.incident_started)}`, card);
       el("p", `Stage: ${row.escalation_stage}`, card);
       el("p", `Next repeat opportunity: ${when(row.next_repeat_opportunity)}`, card);
@@ -125,6 +130,7 @@ class ModernAlertsOverview extends HTMLElement {
       const invoke = async service => {
         await this._hass.callService("modern_alerts", service, {entity_id: row.entity_id}); await this.refresh();
       };
+      if (row.task) this._button(actions, "Done", () => invoke("complete"), !row.can_control || row.task.done);
       this._button(actions, row.acknowledged ? "Resume" : "Acknowledge", () => invoke(row.acknowledged ? "unacknowledge" : "acknowledge"), !row.can_control || !row.active || !row.can_acknowledge);
       this._button(actions, row.snoozed_until ? "Cancel snooze" : "Snooze", () => invoke(row.snoozed_until ? "cancel_snooze" : "snooze"), !row.can_control || !row.active || !row.enable_snooze || row.acknowledged);
       this._button(actions, "Explain delivery", () => this.explain(row));

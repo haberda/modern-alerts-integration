@@ -91,3 +91,129 @@ clear_history:
     entity:
       integration: modern_alerts
       domain: sensor
+complete:
+  name: Complete task
+  description: Mark a recurring task done. Resolves the current reminder and schedules the next due date. Targets Modern Alerts status sensors.
+  fields:
+    completed_at:
+      name: Completed at
+      description: Optional earlier time the task was actually done. Interval tasks count from this time.
+      required: false
+      selector:
+        datetime:
+  target:
+    entity:
+      integration: modern_alerts
+      domain: sensor
+import_task:
+  name: Import recurring task
+  description: Create a recurring task from existing values, so a current due date carries over exactly. Administrators only.
+  fields:
+    name:
+      name: Name
+      required: true
+      selector:
+        text:
+    mode:
+      name: Mode
+      required: false
+      default: after_completion
+      selector:
+        select:
+          options:
+            - after_completion
+            - fixed
+            - once
+    interval:
+      name: Interval
+      description: For after_completion. Time between completions.
+      required: false
+      selector:
+        duration:
+          enable_day: true
+    rrule:
+      name: Recurrence rule
+      description: For fixed. An iCalendar RRULE such as FREQ=WEEKLY;BYDAY=TU.
+      required: false
+      selector:
+        text:
+    time:
+      name: Time of day
+      required: false
+      selector:
+        time:
+    window:
+      name: Window
+      description: For fixed. How long each occurrence stays due.
+      required: false
+      selector:
+        duration:
+    next_due:
+      name: Next due
+      required: false
+      selector:
+        datetime:
+    last_completed:
+      name: Last completed
+      required: false
+      selector:
+        datetime:
+    lead_days:
+      name: Lead days
+      required: false
+      selector:
+        number:
+          min: 0
+          max: 365
+          step: any
+    tags:
+      name: Tag IDs
+      required: false
+      selector:
+        text:
+          multiple: true
+    legacy_actions:
+      name: Legacy action IDs
+      required: false
+      selector:
+        text:
+          multiple: true
+    notifiers:
+      name: Notify actions
+      required: false
+      selector:
+        text:
+          multiple: true
+    notify_entities:
+      name: Notify entities
+      required: false
+      selector:
+        entity:
+          multiple: true
+          filter:
+            domain: notify
+    repeat:
+      name: Repeat intervals (minutes)
+      required: false
+      selector:
+        object:
+    message:
+      name: Message
+      required: false
+      selector:
+        template:
+    title:
+      name: Title
+      required: false
+      selector:
+        template:
+    done_message:
+      name: Done message
+      required: false
+      selector:
+        template:
+    action_buttons:
+      name: Phone controls
+      required: false
+      selector:
+        boolean:

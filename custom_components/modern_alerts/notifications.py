@@ -72,5 +72,9 @@ async def async_notify(
         except Exception as err:  # Providers may raise non-HA exceptions too.
             key = entity_id or f"notify.{service}"
             errors[key] = type(err).__name__
-            _LOGGER.warning("Alert destination %s failed (%s)", key, type(err).__name__)
+            # Destination names identify people and phones: debug level only.
+            _LOGGER.warning(
+                "An alert notification destination failed (%s)", type(err).__name__
+            )
+            _LOGGER.debug("Alert destination %s failed", key)
     return errors

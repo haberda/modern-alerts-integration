@@ -15,18 +15,18 @@ async def async_setup_entry(
     entry: ModernAlertsEntry,
     async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
-    async_add_entities(
-        AlertButton(entry, key)
-        for key in (
-            "acknowledge",
-            "unacknowledge",
-            "snooze",
-            "cancel_snooze",
-            "test_notification",
-            "test_output",
-            "stop_outputs",
-        )
-    )
+    keys = [
+        "acknowledge",
+        "unacknowledge",
+        "snooze",
+        "cancel_snooze",
+        "test_notification",
+        "test_output",
+        "stop_outputs",
+    ]
+    if entry.runtime_data.is_task:
+        keys.append("complete")
+    async_add_entities(AlertButton(entry, key) for key in keys)
 
 
 class AlertButton(ModernAlertEntity, ButtonEntity):
@@ -43,10 +43,14 @@ class AlertButton(ModernAlertEntity, ButtonEntity):
             "cancel_snooze": "mdi:bell-cancel",
             "test_output": "mdi:test-tube",
             "stop_outputs": "mdi:stop-circle",
+            "complete": "mdi:check-circle",
         }[key]
 
     @property
     def available(self) -> bool:
+        if self.key == "complete":
+            # Doing a task early is allowed; a finished one-off has nothing left.
+            return not self.runtime.task_done
         if self.key == "test_output":
             return bool(self.runtime.all_outputs)
         if self.key == "stop_outputs":
@@ -75,7 +79,9 @@ class AlertButton(ModernAlertEntity, ButtonEntity):
         )
 
     async def async_press(self) -> None:
-        if self.key == "test_notification":
+        if self.key == "complete":
+            await self.runtime.async_complete(self._context, via="button")
+        elif self.key == "test_notification":
             await self.runtime.async_test_notification(self._context)
         elif self.key == "snooze":
             self.runtime.snooze(context=self._context)

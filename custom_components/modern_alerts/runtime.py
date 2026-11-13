@@ -2,7 +2,6 @@
 
 import asyncio
 from collections.abc import Callable, Coroutine
-from copy import deepcopy
 from dataclasses import replace
 from datetime import datetime, timedelta
 from math import isfinite
@@ -28,11 +27,13 @@ from .grouping import groups
 from .models import AlertConfig
 from .notifications import async_notify
 from .outputs import OutputManager
+from .persistence import PersistenceMixin
 from .policies import allowed, has_policy
 from .profiles import resolve
+from .tasks import TaskMixin
 
 
-class AlertRuntime:
+class AlertRuntime(PersistenceMixin, TaskMixin):
     """One alert. All transitions run atomically on HA's event loop.
 
     Provider I/O runs outside transitions, so a slow notifier cannot prevent
@@ -79,6 +80,7 @@ class AlertRuntime:
         self._unsub_presence = None
         self.outputs = OutputManager(hass, self._publish, self._record)
         self.test_output_id: str | None = None
+        self._init_task()
 
     def _record(self, event: str, **details) -> None:
         if not self.config.history_limit:
@@ -244,13 +246,20 @@ class AlertRuntime:
 
     @callback
     def _publish(self) -> None:
-        if self.store and not self._stopped and self.config.restore_state:
+        if (
+            self.store
+            and not self._stopped
+            and (self.config.restore_state or self.is_task)
+        ):
             snapshot = self.snapshot()
             self.store.async_delay_save(lambda: snapshot, 1)
         for listener in tuple(self._listeners):
             listener()
 
     def _condition(self) -> list[Any]:
+        if self.is_task:
+            # Schedule edits keep the incident and history; see TaskMixin.
+            return ["schedule"]
         if self.config.conditions:
             return [
                 "compound",
@@ -272,6 +281,15 @@ class AlertRuntime:
         if not self._stopped:
             return
         self._stopped = False
+        if self.is_task:
+            # Nothing is watched: the schedule decides when the task is due.
+            self._restored = False
+            self._task_reconcile(dt_util.utcnow())
+            self._process_due()
+            self._bind_presence()
+            self._arm()
+            self._publish()
+            return
         self._unsubscribe = async_track_state_change_event(
             self.hass,
             list({row["entity_id"] for row in self.config.conditions})
@@ -286,153 +304,6 @@ class AlertRuntime:
         self._restored = False
         self._bind_presence()
         self._arm()
-
-    def snapshot(self) -> dict[str, Any]:
-        """Serialize deadlines, not time remaining, to survive downtime."""
-        data = {
-            key: getattr(self, key)
-            for key in (
-                "firing",
-                "acknowledged",
-                "attempted",
-                "next_index",
-                "pending_active",
-                "incident_id",
-                "action_token",
-            )
-        }
-        data.update(schema=2, condition=self._condition())
-        data["outputs_seen"] = sorted(self.outputs.seen)
-        data["started_at"] = self.started_at.isoformat() if self.started_at else None
-        data["stage_index"] = self.stage_index
-        data["history"] = deepcopy(self.history)
-        data["pending_notification"] = self._pending_notification
-        data["pending_outputs"] = sorted(self._pending_outputs)
-        for key in (
-            "next_notification",
-            "last_attempt",
-            "snoozed_until",
-            "pending_due",
-        ):
-            value = getattr(self, key)
-            data[key] = value.isoformat() if value else None
-        return data
-
-    def restore(self, data: dict[str, Any]) -> None:
-        """Reject incomplete/old snapshots instead of restoring half an incident."""
-        if not self.config.restore_state:
-            return
-        try:
-            if data["schema"] != 2 or data["condition"] != self._condition():
-                return
-            values = {}
-            for key in ("firing", "acknowledged", "attempted"):
-                if type(data[key]) is not bool:
-                    raise ValueError
-                values[key] = data[key]
-            index = data["next_index"]
-            if type(index) is not int or not 0 <= index < len(self.config.repeat):
-                raise ValueError
-            values["next_index"] = index
-            stage = data.get("stage_index", 0)
-            if type(stage) is not int or not 0 <= stage <= len(self.config.stages):
-                raise ValueError
-            values["stage_index"] = stage
-            start = data.get("started_at")
-            started = dt_util.parse_datetime(start) if isinstance(start, str) else None
-            if start is not None and (started is None or started.tzinfo is None):
-                raise ValueError
-            values["started_at"] = started or (
-                dt_util.utcnow() if values["firing"] else None
-            )
-            history = data.get("history", [])
-            if (
-                not isinstance(history, list)
-                or len(history) > 100
-                or any(
-                    not isinstance(item, dict)
-                    or not set(item)
-                    <= {
-                        "at",
-                        "incident_id",
-                        "event",
-                        "output_id",
-                        "entity_id",
-                        "error",
-                        "errors",
-                        "stage",
-                        "count",
-                        "acknowledged",
-                    }
-                    for item in history
-                )
-            ):
-                raise ValueError
-            values["history"] = (
-                deepcopy(history[-self.config.history_limit :])
-                if self.config.history_limit
-                else []
-            )
-            pending_notification = data.get("pending_notification", False)
-            pending_outputs = data.get("pending_outputs", [])
-            if (
-                type(pending_notification) is not bool
-                or not isinstance(pending_outputs, list)
-                or any(not isinstance(key, str) for key in pending_outputs)
-            ):
-                raise ValueError
-            values["_pending_notification"] = pending_notification
-            values["_pending_outputs"] = set(pending_outputs)
-            for key in (
-                "next_notification",
-                "last_attempt",
-                "snoozed_until",
-                "pending_due",
-            ):
-                raw = data[key]
-                value = dt_util.parse_datetime(raw) if isinstance(raw, str) else None
-                if raw is not None and (value is None or value.tzinfo is None):
-                    raise ValueError
-                values[key] = value
-            for key in ("incident_id", "action_token"):
-                if not isinstance(data[key], str):
-                    raise ValueError
-                values[key] = data[key]
-            pending = data["pending_active"]
-            if pending is not None and type(pending) is not bool:
-                raise ValueError
-            if (pending is None) != (values["pending_due"] is None):
-                raise ValueError
-            if values["firing"] and (
-                values["next_notification"] is None or not values["incident_id"]
-            ):
-                raise ValueError
-            if not values["firing"] and (
-                values["next_notification"] or values["snoozed_until"]
-            ):
-                raise ValueError
-            values["pending_active"] = pending
-            seen = data.get("outputs_seen", [])
-            if not isinstance(seen, list) or any(
-                not isinstance(key, str) for key in seen
-            ):
-                raise ValueError
-        except KeyError, TypeError, ValueError, OverflowError:
-            self.errors = {"restore": "invalid_snapshot"}
-            return
-        for key, value in values.items():
-            setattr(self, key, value)
-        self._restored = True
-        self.outputs.seen = set(seen)
-
-    async def async_save(self, snapshot: dict[str, Any] | None = None) -> None:
-        if self.store:
-            if self.config.restore_state:
-                await self.store.async_save(
-                    snapshot if snapshot is not None else self.snapshot()
-                )
-            else:
-                await self.store.async_remove()
 
     @callback
     def _state_changed(self, event: Event[EventStateChangedData]) -> None:
@@ -464,7 +335,7 @@ class AlertRuntime:
             and (self.config.unavailable_policy == "suspend" or self._awaiting_source)
         ):
             if not self.source_suspended:
-                self.outputs.stop()
+                self.outputs.stop(effects_only=True)
             self.source_suspended = True
             # A gap in observed data breaks a sustained transition, except while
             # waiting for the first usable state of a restored incident.
@@ -528,11 +399,14 @@ class AlertRuntime:
         return value > self.config.numeric_above
 
     @callback
-    def _transition(self, active: bool) -> None:
+    def _transition(self, active: bool, *, notify_done: bool = True) -> None:
+        """Start or end an incident. A missed task window ends without fanfare."""
         groups(self.hass).cancel(self.entry_id or str(id(self)))
         previous_variables = self._output_variables()
-        send_done = self.attempted and (
-            self.config.resolution_after_ack or not self.acknowledged
+        send_done = (
+            notify_done
+            and self.attempted
+            and (self.config.resolution_after_ack or not self.acknowledged)
         )
         self.outputs.stop()
         self._generation += 1
@@ -588,6 +462,11 @@ class AlertRuntime:
         if self.snoozed_until and self.snoozed_until <= now:
             self.snoozed_until = None
             self._record("snooze_expired")
+            if self.firing and not self.acknowledged:
+                # The pause is over: remind now and restart the interval from
+                # here, instead of staying silent until the old schedule.
+                self.next_notification = now
+        self._task_process(now)
         if self.source_suspended:
             return
         if self.pending_due and self.pending_due <= now:
@@ -619,7 +498,7 @@ class AlertRuntime:
         self._cancel()
         if self._stopped:
             return
-        deadlines = [self.snoozed_until]
+        deadlines = [self.snoozed_until, *self._task_deadlines()]
         if not self.source_suspended:
             deadlines.extend((self.pending_due, self.next_notification))
             if self.firing:
@@ -767,14 +646,18 @@ class AlertRuntime:
         if acknowledged and not self.config.can_acknowledge:
             raise ServiceValidationError("This alert cannot be acknowledged")
         self._context = context
-        if self.acknowledged != acknowledged:
+        if self.acknowledged != acknowledged and self.firing:
             self._record("acknowledged" if acknowledged else "resumed")
+            if not acknowledged:
+                # Someone asked to be reminded again: a replayed Acknowledge
+                # from an earlier notification must not silence it.
+                self.action_token = uuid4().hex
         self.acknowledged = acknowledged
         if acknowledged:
             groups(self.hass).cancel(self.entry_id or str(id(self)))
             self._pending_notification = False
             self._pending_outputs.clear()
-            self.outputs.stop()
+            self.outputs.stop(effects_only=True)
         self.snoozed_until = None
         self._arm()
         self._publish()
@@ -797,7 +680,7 @@ class AlertRuntime:
             )
         self._context = context
         self.snoozed_until = dt_util.utcnow() + timedelta(minutes=minutes)
-        self.outputs.stop()
+        self.outputs.stop(effects_only=True)
         groups(self.hass).cancel(self.entry_id or str(id(self)))
         self._record("snoozed")
         self._arm()
@@ -816,11 +699,14 @@ class AlertRuntime:
             f"MODERN_ALERTS:{self.entry_id}:{self.incident_id}:{self.action_token}:"
         )
         actions = []
+        if self.is_task:
+            actions.append({"action": prefix + "DONE", "title": "Done"})
         if self.config.can_acknowledge:
             actions.append({"action": prefix + "ACK", "title": "Acknowledge"})
         if self.config.enable_snooze:
             actions.append({"action": prefix + "SNOOZE", "title": "Snooze"})
-        if self.status_entity_id:
+        # Android shows at most three actions; the controls take priority.
+        if self.status_entity_id and len(actions) < 3:
             actions.append(
                 {
                     "action": "URI",
@@ -831,7 +717,16 @@ class AlertRuntime:
         return actions
 
     @callback
-    def handle_mobile_action(self, action: str, context: Context | None = None) -> None:
+    def handle_mobile_action(
+        self, action: str, context: Context | None = None, by: str | None = None
+    ) -> None:
+        """Apply a phone control for the current incident.
+
+        The token stays valid while the incident is being handled, so every
+        recipient's copy keeps working, and repeats are harmless because each
+        control is idempotent. A new incident or an explicit Resume issues a
+        new token.
+        """
         if self._stopped or not self.firing or not self.attempted:
             return
         valid = {
@@ -841,13 +736,13 @@ class AlertRuntime:
         }
         if action not in valid:
             return
-        if action.endswith(":ACK"):
-            self.acknowledge(True, context)
-        else:
+        if action.endswith(":DONE"):
+            self.complete(context, via="phone_action", by=by)
+        elif action.endswith(":ACK"):
+            if not self.acknowledged:
+                self.acknowledge(True, context)
+        elif not self.acknowledged and not self.snoozed_until:
             self.snooze(context=context)
-        # Repeated callbacks and controls from older notifications become inert.
-        self.action_token = uuid4().hex
-        self._publish()
 
     async def async_test_notification(self, context: Context | None = None) -> None:
         """Explicit test: no incident bookkeeping or resolution eligibility."""
@@ -955,7 +850,9 @@ class AlertRuntime:
         self.next_index = min(self.next_index, len(config.repeat) - 1)
         self.start()
         # Edits reconcile the current source even in legacy startup mode.
-        if (state := self.hass.states.get(config.entity_id)) is not None:
+        if self.is_task:
+            pass
+        elif (state := self.hass.states.get(config.entity_id)) is not None:
             self._evaluate(state.state)
         elif (
             config.conditions

@@ -7,6 +7,7 @@ import voluptuous as vol
 from homeassistant import config_entries
 from homeassistant.core import callback
 from homeassistant.helpers import selector
+from homeassistant.util import dt as dt_util
 
 from .const import DOMAIN, MIN_REPEAT
 from .importer import parse_alerts
@@ -14,6 +15,44 @@ from .models import AlertConfig, InvalidConfig
 from .output_flow import OutputFlowSteps
 from .policy_flow import DeliveryFlowSteps
 from .profiles import resolve
+from .schedule import initial_due
+
+TASK_KEYS = (
+    "task_mode",
+    "task_interval",
+    "task_time",
+    "task_rrule",
+    "task_window",
+    "task_first_due",
+    "task_lead_days",
+    "task_tags",
+    "task_legacy_actions",
+)
+# Fields that describe a watched entity and mean nothing for a schedule.
+ENTITY_ONLY_TIMING = (
+    "evaluate_on_start",
+    "activation_delay",
+    "recovery_delay",
+    "unavailable_policy",
+)
+
+
+def _duration(minutes):
+    """Minutes as the mapping Home Assistant's duration selector edits."""
+    if not minutes:
+        return None
+    total = round(minutes * 60)
+    return {
+        "days": total // 86400,
+        "hours": total % 86400 // 3600,
+        "minutes": total % 3600 // 60,
+        "seconds": total % 60,
+    }
+
+
+def _span(minutes):
+    parts = _duration(minutes) or {}
+    return " ".join(f"{value} {unit}" for unit, value in parts.items() if value) or "0"
 
 
 class AlertFlowSteps(OutputFlowSteps, DeliveryFlowSteps):
@@ -51,13 +90,38 @@ class AlertFlowSteps(OutputFlowSteps, DeliveryFlowSteps):
                 if step_id == "user"
                 else self._values.get("kind", "alert")
             )
+            # The source is chosen once, at creation.
+            values["source"] = (
+                user_input.get("source", self._values.get("source", "entity"))
+                if step_id == "user"
+                else self._values.get("source", "entity")
+            )
+            if values["source"] == "schedule":
+                # The schedule is collected on the next form; validate the
+                # rest against a placeholder one.
+                draft = {
+                    "task_mode": "after_completion",
+                    "task_interval": 1440,
+                    **self._values,
+                    **values,
+                }
+                try:
+                    AlertConfig.from_dict(draft, self.hass)
+                except InvalidConfig as err:
+                    errors[err.field if err.field == "name" else "base"] = err.code
+                else:
+                    self._values.update(values)
+                    return await self.async_step_task()
+                values = None
             if (
-                isinstance(values.get("conditions"), list)
+                values is not None
+                and isinstance(values.get("conditions"), list)
                 and values["conditions"]
                 and isinstance(values["conditions"][0], dict)
                 and not values.get("entity_id")
             ):
                 values["entity_id"] = values["conditions"][0].get("entity_id")
+        if user_input is not None and values is not None:
             if values["kind"] == "profile":
                 values["entity_id"] = "sensor.modern_alerts_profile"
             try:
@@ -90,6 +154,9 @@ class AlertFlowSteps(OutputFlowSteps, DeliveryFlowSteps):
             fields[vol.Optional("name")] = selector.TextSelector()
             fields[vol.Required("kind", default="alert")] = selector.SelectSelector(
                 {"options": ["alert", "profile"], "translation_key": "entry_kind"}
+            )
+            fields[vol.Required("source", default="entity")] = selector.SelectSelector(
+                {"options": ["entity", "schedule"], "translation_key": "alert_source"}
             )
         for key in numeric_fields[:-1]:
             fields[vol.Optional(key)] = selector.NumberSelector(
@@ -124,7 +191,10 @@ class AlertFlowSteps(OutputFlowSteps, DeliveryFlowSteps):
         fields[vol.Required("condition_mode", default="all")] = selector.SelectSelector(
             {"options": ["all", "any"], "translation_key": "condition_mode"}
         )
-        if step_id == "init" and self._values.get("kind") == "profile":
+        if step_id == "init" and (
+            self._values.get("kind") == "profile"
+            or self._values.get("source") == "schedule"
+        ):
             fields = {vol.Required("name"): selector.TextSelector()}
         return self.async_show_form(
             step_id=step_id,
@@ -135,6 +205,72 @@ class AlertFlowSteps(OutputFlowSteps, DeliveryFlowSteps):
                     for key, value in (user_input or self._values).items()
                     if value is not None
                 },
+            ),
+            errors=errors,
+        )
+
+    async def async_step_task(self, user_input=None):
+        """The schedule of a recurring task and the ways to mark it done."""
+        errors = {}
+        stored = self._values
+        values = {
+            "task_mode": stored.get("task_mode", "after_completion"),
+            "task_interval": _duration(stored.get("task_interval")),
+            "task_time": stored.get("task_time", "12:00:00"),
+            "task_rrule": stored.get("task_rrule"),
+            "task_window": _duration(stored.get("task_window")),
+            "task_first_due": stored.get("task_first_due"),
+            "task_lead_days": stored.get("task_lead_days", 0),
+            "task_tags": stored.get("task_tags", []),
+            "task_legacy_actions": stored.get("task_legacy_actions", []),
+        }
+        if user_input is not None:
+            # An omitted optional field means clear it, including when editing.
+            values = {key: None for key in TASK_KEYS} | user_input
+            try:
+                config = AlertConfig.from_dict(
+                    {**stored, **values, "source": "schedule"}, self.hass
+                )
+            except InvalidConfig as err:
+                errors[err.field if err.field in TASK_KEYS else "base"] = err.code
+            else:
+                saved = config.as_dict()
+                self._values.update({key: saved[key] for key in TASK_KEYS})
+                self._values["entity_id"] = saved["entity_id"]
+                return await self.async_step_timing()
+        duration = selector.DurationSelector({"enable_day": True})
+        fields = {
+            vol.Required("task_mode", default="after_completion"): (
+                selector.SelectSelector(
+                    {
+                        "options": ["after_completion", "fixed", "once"],
+                        "translation_key": "task_mode",
+                    }
+                )
+            ),
+            vol.Optional("task_interval"): duration,
+            vol.Optional("task_time"): selector.TimeSelector(),
+            vol.Optional("task_rrule"): selector.TextSelector(),
+            vol.Optional("task_window"): duration,
+            vol.Optional("task_first_due"): selector.DateTimeSelector(),
+            vol.Optional("task_lead_days"): selector.NumberSelector(
+                {
+                    "min": 0,
+                    "max": 365,
+                    "step": "any",
+                    "mode": "box",
+                    "unit_of_measurement": "days",
+                }
+            ),
+            vol.Optional("task_tags"): selector.TextSelector({"multiple": True}),
+            vol.Optional("task_legacy_actions"): selector.TextSelector(
+                {"multiple": True}
+            ),
+        }
+        return self.async_show_form(
+            step_id="task",
+            data_schema=self._schema(
+                fields, {k: v for k, v in values.items() if v is not None}
             ),
             errors=errors,
         )
@@ -225,6 +361,12 @@ class AlertFlowSteps(OutputFlowSteps, DeliveryFlowSteps):
             ),
             vol.Required("action_buttons", default=False): selector.BooleanSelector(),
         }
+        if self._values.get("source") == "schedule":
+            fields = {
+                key: value
+                for key, value in fields.items()
+                if key.schema not in ENTITY_ONLY_TIMING
+            }
         return self.async_show_form(
             step_id="timing", data_schema=self._schema(fields, values), errors=errors
         )
@@ -351,32 +493,62 @@ class AlertFlowSteps(OutputFlowSteps, DeliveryFlowSteps):
             effective.notify_entities
         )
         targets.extend(f"{item['name']} ({item['type']})" for item in effective.outputs)
+        state = (
+            f"{config.condition_mode} of {len(config.conditions)} compound rules"
+            if config.conditions
+            else f"below {config.numeric_below:g}"
+            if config.numeric_below is not None
+            else f"above {config.numeric_above:g}"
+            if config.numeric_above is not None
+            else config.state
+        )
+        current = (
+            f"{source.state} {source.attributes.get('unit_of_measurement', '')}".strip()
+            if source
+            else "not currently available"
+        )
+        recovery = (
+            f"above {config.numeric_recover_above:g}"
+            if config.numeric_recover_above is not None
+            else f"below {config.numeric_recover_below:g}"
+            if config.numeric_recover_below is not None
+            else "when the problem condition clears"
+        )
+        if config.is_task:
+            due = initial_due(config, dt_util.utcnow(), None)
+            rule = {
+                "after_completion": f"every {_span(config.task_interval)} after it is completed",
+                "fixed": f"on the schedule `{config.task_rrule}`"
+                + (
+                    f", open for {_span(config.task_window)}"
+                    if config.task_window
+                    else ", until completed"
+                ),
+                "once": "once",
+            }[config.task_mode]
+            summary = (
+                f"Recurring task, due {rule}. A new task would first be due "
+                f"{dt_util.as_local(due).strftime('%Y-%m-%d %H:%M') if due else 'never'}; "
+                "an existing task keeps its schedule unless the rule changed. "
+                f"Tags: {len(config.task_tags)}. "
+                f"Legacy action IDs: {len(config.task_legacy_actions)}."
+            )
+        else:
+            summary = (
+                f"Watch `{config.entity_id}` for `{state}`. Current source state "
+                f"and unit: `{current}`. Recovery: {recovery}."
+            )
         return self.async_show_form(
             step_id="review",
             data_schema=vol.Schema({}),
             description_placeholders={
                 "name": config.name,
+                "summary": summary,
                 "entity": config.entity_id,
-                "state": (
-                    f"{config.condition_mode} of {len(config.conditions)} compound rules"
-                    if config.conditions
-                    else f"below {config.numeric_below:g}"
-                    if config.numeric_below is not None
-                    else f"above {config.numeric_above:g}"
-                    if config.numeric_above is not None
-                    else config.state
-                ),
-                "current": f"{source.state} {source.attributes.get('unit_of_measurement', '')}".strip()
-                if source
-                else "not currently available",
+                "state": state,
+                "current": current,
                 "reliability": f"Activation/recovery delays: {config.activation_delay:g}/{config.recovery_delay:g} seconds. Restore state: {config.restore_state}. Unavailable source: {config.unavailable_policy}. Default snooze: {config.snooze_minutes:g} minutes. Phone controls: {config.action_buttons}.",
-                "recovery": (
-                    f"above {config.numeric_recover_above:g}"
-                    if config.numeric_recover_above is not None
-                    else f"below {config.numeric_recover_below:g}"
-                    if config.numeric_recover_below is not None
-                    else "when the problem condition clears"
-                ),
+                "recovery": recovery,
                 "schedule": intervals,
                 "first": f"after {config.repeat[0]:g} minutes"
                 if config.skip_first
@@ -400,6 +572,18 @@ class ModernAlertsConfigFlow(AlertFlowSteps, config_entries.ConfigFlow, domain=D
     """Create an alert through Devices & services."""
 
     VERSION = 1
+    MINOR_VERSION = 2
+
+    async def async_step_import(self, import_data):
+        """Create a task from the import_task action, without any forms."""
+        try:
+            config = AlertConfig.from_dict(import_data["config"], self.hass)
+        except InvalidConfig as err:
+            return self.async_abort(reason=f"invalid_{err.field}")
+        return self.async_create_entry(
+            title=config.name,
+            data={**config.as_dict(), "task_seed": import_data.get("task_seed", {})},
+        )
 
     async def async_step_user(self, user_input=None):
         if not hasattr(self, "_values"):
