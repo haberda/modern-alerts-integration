@@ -1,3 +1,11 @@
+[project]
+name = "modern-alerts"
+version = "0.6.1"
+description = "Development tooling for the Modern Alerts Home Assistant integration"
+# Home Assistant has required Python 3.14 since 2026.3; no older interpreter
+# is supported.
+requires-python = ">=3.14"
+
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"

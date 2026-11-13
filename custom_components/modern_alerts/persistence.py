@@ -44,11 +44,13 @@ class PersistenceMixin:
     def restore(self, data: dict[str, Any]) -> None:
         """Reject incomplete/old snapshots instead of restoring half an incident.
 
-        A task's schedule is restored separately and unconditionally: losing
-        the next due date on restart would silently reset the task.
+        A task always restores, whatever the restore-state option says. It has
+        no watched entity to re-evaluate, so the snapshot is the only record
+        of its schedule, its current incident, and its history; without it a
+        restart would re-announce a task that was already acknowledged.
         """
         self.task_restore(data.get("task"))
-        if not self.config.restore_state:
+        if not (self.config.restore_state or self.is_task):
             return
         try:
             if data["schema"] != 2 or data["condition"] != self._condition():

@@ -240,7 +240,7 @@
       },
       "task": {
         "title": "Recurring task",
-        "description": "Choose when the task becomes due and how it can be marked done. Reminders, acknowledgement, snooze, and outputs are set on the following forms and work as they do for other alerts. Acknowledging only stops the reminders; the task stays due until it is completed.",
+        "description": "Choose when the task becomes due and how it can be marked done. Reminders, acknowledgement, snooze, and outputs are set on the following forms and work as they do for other alerts. Acknowledging only stops the reminders; the task stays due until it is completed. A task always keeps its due date, current reminder, acknowledgement, and history across restarts, and becomes due at startup if its time passed while Home Assistant was off.",
         "data": {
           "task_mode": "Schedule type",
           "task_interval": "Interval",
@@ -259,7 +259,7 @@
           "task_rrule": "Fixed schedule only. An iCalendar rule such as FREQ=WEEKLY;BYDAY=TU or FREQ=MONTHLY;BYMONTHDAY=1. Daily, weekly, monthly, and yearly rules are supported.",
           "task_window": "Fixed schedule only. The task is due from each start until it is completed or this much time has passed; an unanswered window is recorded as missed and reminders stop. Empty keeps the task due until completed.",
           "task_first_due": "Required for Once. Otherwise optional: seeds the first due date, and anchors rules such as every second week. Empty starts one interval from now, or at the next occurrence.",
-          "task_lead_days": "Mark the task as upcoming this many days before it is due. This only sets an attribute; no notification is sent early.",
+          "task_lead_days": "Mark the task as upcoming this many days before it is due. This only sets an attribute; no notification is sent early. For a fixed schedule it also decides whether completing early counts: a completion inside the lead time skips the coming occurrence, so set 1 day to let doing it the day before count.",
           "task_tags": "Scanning any of these tags completes the task. Copy the tag ID from Settings > Tags.",
           "task_legacy_actions": "Plain mobile action IDs that also complete the task, so existing notifications and shortcuts keep working during a migration."
         }
@@ -523,7 +523,7 @@
       },
       "task": {
         "title": "Recurring task",
-        "description": "Choose when the task becomes due and how it can be marked done. Reminders, acknowledgement, snooze, and outputs are set on the following forms and work as they do for other alerts. Acknowledging only stops the reminders; the task stays due until it is completed.",
+        "description": "Choose when the task becomes due and how it can be marked done. Reminders, acknowledgement, snooze, and outputs are set on the following forms and work as they do for other alerts. Acknowledging only stops the reminders; the task stays due until it is completed. A task always keeps its due date, current reminder, acknowledgement, and history across restarts, and becomes due at startup if its time passed while Home Assistant was off.",
         "data": {
           "task_mode": "Schedule type",
           "task_interval": "Interval",
@@ -542,7 +542,7 @@
           "task_rrule": "Fixed schedule only. An iCalendar rule such as FREQ=WEEKLY;BYDAY=TU or FREQ=MONTHLY;BYMONTHDAY=1. Daily, weekly, monthly, and yearly rules are supported.",
           "task_window": "Fixed schedule only. The task is due from each start until it is completed or this much time has passed; an unanswered window is recorded as missed and reminders stop. Empty keeps the task due until completed.",
           "task_first_due": "Required for Once. Otherwise optional: seeds the first due date, and anchors rules such as every second week. Empty starts one interval from now, or at the next occurrence.",
-          "task_lead_days": "Mark the task as upcoming this many days before it is due. This only sets an attribute; no notification is sent early.",
+          "task_lead_days": "Mark the task as upcoming this many days before it is due. This only sets an attribute; no notification is sent early. For a fixed schedule it also decides whether completing early counts: a completion inside the lead time skips the coming occurrence, so set 1 day to let doing it the day before count.",
           "task_tags": "Scanning any of these tags completes the task. Copy the tag ID from Settings > Tags.",
           "task_legacy_actions": "Plain mobile action IDs that also complete the task, so existing notifications and shortcuts keep working during a migration."
         }

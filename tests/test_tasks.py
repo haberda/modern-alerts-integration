@@ -1,6 +1,9 @@
 """Recurring tasks: schedule maths, completion paths, restore, and edits."""
 
+import json
+import tomllib
 from datetime import datetime, timedelta
+from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -585,3 +588,201 @@ async def test_entity_names_never_repeat_the_setup_name(hass, notifications):
         assert item.entity_id.count("dan_s_office_filter") == 1
         friendly = hass.states.get(item.entity_id).attributes["friendly_name"]
         assert friendly.count("Dan's office filter") == 1
+
+
+def overdue_filter(**overrides):
+    """A task that is already due when it is first set up."""
+    return filter_task(task_first_due="2026-11-12 12:00:00", **overrides)
+
+
+async def reload(hass, entry):
+    assert await hass.config_entries.async_reload(entry.entry_id)
+    await hass.async_block_till_done()
+    return entry.runtime_data
+
+
+async def test_acknowledged_due_task_survives_reload_by_default(
+    hass, notifications, freezer
+):
+    freezer.move_to(local("2026-11-13 10:00"))
+    entry = await setup_task(hass, **overdue_filter())
+    runtime = entry.runtime_data
+    assert not runtime.config.restore_state
+    assert runtime.firing and len(notifications) == 1
+    runtime.acknowledge(True)
+    incident, history = runtime.incident_id, list(runtime.history)
+    freezer.move_to(local("2026-11-13 10:05"))
+    runtime = await reload(hass, entry)
+    assert runtime.firing and runtime.acknowledged and runtime.state == "off"
+    assert runtime.incident_id == incident and len(notifications) == 1
+    assert runtime.history == history
+    assert [item["event"] for item in history][:1] == ["started"]
+    # A full stop and start, long enough for a reminder to have come due.
+    assert await hass.config_entries.async_unload(entry.entry_id)
+    freezer.move_to(local("2026-11-14 10:00"))
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    runtime = entry.runtime_data
+    assert runtime.acknowledged and runtime.incident_id == incident
+    assert len(notifications) == 1 and runtime.history == history
+
+
+async def test_due_task_reload_keeps_reminder_deadline_and_phone_token(
+    hass, notifications, freezer
+):
+    calls = async_mock_service(hass, "notify", "mobile_app_phone")
+    freezer.move_to(local("2026-11-13 10:00"))
+    entry = await setup_task(
+        hass, **overdue_filter(notifiers=["mobile_app_phone"], action_buttons=True)
+    )
+    assert len(calls) == 1
+    deadline = entry.runtime_data.next_notification
+    assert deadline == local("2026-11-13 11:00")
+    done = calls[-1].data["data"]["actions"][0]["action"]
+    assert done.endswith(":DONE")
+    freezer.move_to(local("2026-11-13 10:20"))
+    runtime = await reload(hass, entry)
+    assert runtime.firing and len(calls) == 1
+    assert runtime.next_notification == deadline
+    await move(hass, freezer, "2026-11-13 10:59")
+    assert len(calls) == 1
+    await move(hass, freezer, "2026-11-13 11:00")
+    assert len(calls) == 2
+    # The button on the notification sent before the reload still works.
+    hass.bus.async_fire("mobile_app_notification_action", {"action": done})
+    await hass.async_block_till_done()
+    assert not runtime.firing and runtime.completed_by == "phone_action"
+    assert runtime.next_due == local("2027-05-12 12:00")
+
+
+async def test_window_that_ended_while_down_is_one_quiet_miss(
+    hass, notifications, freezer
+):
+    freezer.move_to(local("2026-11-13 10:00"))
+    entry = await setup_task(hass, **garbage())
+    assert not entry.runtime_data.config.restore_state
+    await move(hass, freezer, "2026-11-17 17:00")
+    assert entry.runtime_data.firing and len(notifications) == 1
+    assert await hass.config_entries.async_unload(entry.entry_id)
+    freezer.move_to(local("2026-11-18 08:00"))
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    runtime = entry.runtime_data
+    assert not runtime.firing and runtime.missed == 1
+    assert len(notifications) == 1  # No reminder and no "done" message.
+    events = [item["event"] for item in runtime.history]
+    assert events.count("missed") == 1 and events[0] == "started"
+    assert runtime.next_due == local("2026-11-24 17:00")
+
+
+async def test_schedule_edit_keeps_a_restored_incident(hass, notifications, freezer):
+    freezer.move_to(local("2026-11-13 10:00"))
+    entry = await setup_task(hass, **overdue_filter())
+    runtime = entry.runtime_data
+    runtime.acknowledge(True)
+    incident = runtime.incident_id
+    runtime = await reload(hass, entry)
+    hass.config_entries.async_update_entry(
+        entry, options={**runtime.config.as_dict(), "task_lead_days": 2}
+    )
+    await hass.async_block_till_done()
+    assert runtime.firing and runtime.acknowledged
+    assert runtime.incident_id == incident and len(notifications) == 1
+    # Saving again with the first-due date unchanged does not move the task.
+    assert runtime.next_due == local("2026-11-12 12:00")
+
+
+async def test_entity_alert_without_restore_state_starts_fresh(
+    hass, notifications, freezer
+):
+    entry = await setup_alert(hass)
+    hass.states.async_set("binary_sensor.garage", "on")
+    await hass.async_block_till_done()
+    runtime = entry.runtime_data
+    runtime.acknowledge(True)
+    assert runtime.firing and runtime.history
+    runtime = await reload(hass, entry)
+    # Unchanged legacy behaviour: nothing is carried over.
+    assert not runtime.firing and not runtime.acknowledged and not runtime.history
+    assert runtime.incident_id == "" and len(notifications) == 1
+
+
+async def test_import_prefers_explicit_due_date_over_last_completion(
+    hass, notifications, freezer
+):
+    freezer.move_to(local("2026-11-13 10:00"))
+    await setup_alert(hass)
+
+    async def imported(name, **fields):
+        await hass.services.async_call(
+            DOMAIN,
+            "import_task",
+            {"name": name, "interval": {"days": 180}, **fields},
+            blocking=True,
+        )
+        await hass.async_block_till_done()
+        return next(
+            item
+            for item in hass.config_entries.async_entries(DOMAIN)
+            if item.title == name
+        )
+
+    # A due date that was moved by a snooze: not completion + 180 days.
+    both = await imported(
+        "Both",
+        last_completed="2026-05-23 12:00:00",
+        next_due="2026-11-21 12:00:00",
+    )
+    runtime = both.runtime_data
+    assert runtime.next_due == local("2026-11-21 12:00")
+    assert runtime.last_completed == local("2026-05-23 12:00")
+    # Reload and an unrelated options save leave the imported date alone.
+    runtime = await reload(hass, both)
+    hass.config_entries.async_update_entry(
+        both, options={**runtime.config.as_dict(), "name": "Both renamed"}
+    )
+    await hass.async_block_till_done()
+    assert runtime.next_due == local("2026-11-21 12:00")
+    # An interval edit still recomputes from the last completion.
+    hass.config_entries.async_update_entry(
+        both, options={**runtime.config.as_dict(), "task_interval": 200 * 1440}
+    )
+    await hass.async_block_till_done()
+    assert runtime.next_due == local("2026-12-09 12:00")
+    await move(hass, freezer, "2026-12-09 12:00")
+    runtime.complete()
+    assert runtime.next_due == local("2027-06-27 12:00")
+
+    freezer.move_to(local("2026-11-13 10:00"))
+    only_completed = await imported("Completed", last_completed="2026-05-23 12:00:00")
+    assert only_completed.runtime_data.next_due == local("2026-11-19 12:00")
+    only_due = await imported("Due", next_due="2026-12-01 08:30:00")
+    assert only_due.runtime_data.next_due == local("2026-12-01 08:30")
+    assert only_due.runtime_data.last_completed is None
+
+
+async def test_task_options_hide_restore_and_startup_fields(hass, notifications):
+    entry = await setup_task(hass, **filter_task())
+    options = hass.config_entries.options
+    result = await options.async_init(entry.entry_id)
+    result = await options.async_configure(result["flow_id"], {"name": "RO filter"})
+    result = await options.async_configure(
+        result["flow_id"],
+        {"task_mode": "after_completion", "task_interval": {"days": 180}},
+    )
+    assert result["step_id"] == "timing"
+    shown = {key.schema for key in result["data_schema"].schema}
+    assert not shown & {"restore_state", "evaluate_on_start", "activation_delay"}
+    assert {"intervals", "enable_snooze"} <= shown
+
+
+def test_versions_and_python_floor_agree():
+    root = Path(__file__).parents[1]
+    manifest = json.loads(
+        (root / "custom_components/modern_alerts/manifest.json").read_text()
+    )
+    project = tomllib.loads((root / "pyproject.toml").read_text())
+    assert project["project"]["version"] == manifest["version"]
+    assert project["project"]["requires-python"] == ">=3.14"
+    assert project["tool"]["ruff"]["target-version"] == "py314"
+    assert json.loads((root / "hacs.json").read_text())["homeassistant"] == "2026.9.2"

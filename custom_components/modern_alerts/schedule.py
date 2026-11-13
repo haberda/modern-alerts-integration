@@ -129,12 +129,22 @@ def due_after_completion(config, completed: datetime) -> datetime:
     return _from_naive(datetime.combine(day, _time(config)))
 
 
-def initial_due(config, now: datetime, last_completed: datetime | None):
-    """Seed the schedule for a new task or after its rule was edited."""
+def initial_due(
+    config, now: datetime, last_completed: datetime | None, *, first_schedule=False
+):
+    """Seed the schedule for a new task or after its rule was edited.
+
+    A brand-new task honours an explicit first due date even when a previous
+    completion is known: an imported due date may have been moved by hand and
+    is not always the last completion plus the interval. Once the task exists,
+    a rule edit recomputes from the last completion.
+    """
     first = parse_local(config.task_first_due)
     if config.task_mode == "once":
         return first
     if config.task_mode == "after_completion":
+        if first_schedule and first is not None:
+            return first
         if last_completed is not None:
             return due_after_completion(config, last_completed)
         return first or due_after_completion(config, now)

@@ -79,7 +79,12 @@ class TaskMixin:
         if self._task_sig is None or signature != self._task_sig:
             # History and the last completion survive a schedule edit.
             self.task_done = False
-            self.next_due = schedule.initial_due(config, now, self.last_completed)
+            self.next_due = schedule.initial_due(
+                config,
+                now,
+                self.last_completed,
+                first_schedule=self._task_sig is None,
+            )
         elif seed != self._task_seed and seed:
             self.task_done = False
             self.next_due = (

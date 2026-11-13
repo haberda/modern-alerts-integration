@@ -28,9 +28,12 @@ TASK_KEYS = (
     "task_tags",
     "task_legacy_actions",
 )
-# Fields that describe a watched entity and mean nothing for a schedule.
+# Fields that describe a watched entity and mean nothing for a schedule. A
+# task always restores its incident and always becomes due at startup if its
+# time passed while Home Assistant was off.
 ENTITY_ONLY_TIMING = (
     "evaluate_on_start",
+    "restore_state",
     "activation_delay",
     "recovery_delay",
     "unavailable_policy",
